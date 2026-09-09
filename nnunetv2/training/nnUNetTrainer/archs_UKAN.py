@@ -12,7 +12,7 @@ import os
 import matplotlib.pyplot as plt
 try:
     from .GBC_utils import *
-except (ImportError, ValueError)
+except (ImportError, ValueError):
     from GBC_utils import *
 import timm
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
