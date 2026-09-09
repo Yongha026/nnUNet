@@ -100,6 +100,7 @@ ENV/
 *.txt
 .idea/*
 *.png
+.out
 # *.nii.gz  # nifti files needed for example_data for github actions tests
 *.nii
 *.tif
@@ -118,3 +119,5 @@ ENV/
 
 CLAUDE.md
 AGENTS.md
+
+./nnUNet_eds400_pre.sh
