@@ -10,8 +10,10 @@ from torchvision.utils import save_image
 import torch.nn.functional as F
 import os
 import matplotlib.pyplot as plt
-from GBC_utils import *
-
+try:
+    from .GBC_utils import *
+except (ImportError, ValueError)
+    from GBC_utils import *
 import timm
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import types
