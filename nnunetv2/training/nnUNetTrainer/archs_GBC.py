@@ -327,7 +327,7 @@ class GBC_Rolling_Unet_S(nn.Module):
                  embed_dims=[16, 32, 64, 128, 256],
                  num_heads=[1, 2, 4, 8], qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1],
-                 gbc_num_balls=32, gbc_proj_dim=None, use_diag_cov=True, tau=1.0, **kwargs):
+                 gbc_num_balls=16, gbc_proj_dim=None, use_diag_cov=True, tau=1.0, **kwargs):
         super().__init__()
 
         self.embed_dims = embed_dims
