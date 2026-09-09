@@ -158,7 +158,7 @@ class nnUNetTrainerGBC_S(nnUNetTrainerGBC):
             input_channels=num_input_channels,
             deep_supervision=False,
             img_size=img_size,
-            gbc_num_balls=32,
+            gbc_num_balls=16,
         )
 # class GBC_Rolling_Unet_L(nn.Module):
 #     def __init__(self, num_classes, input_channels=3, deep_supervision=False, img_size=224,
