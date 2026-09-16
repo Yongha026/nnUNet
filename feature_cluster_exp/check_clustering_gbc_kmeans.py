@@ -40,6 +40,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import ListedColormap
+# plt.rcParams['text.usetex'] = True
 
 # Scikit-learn & Scipy imports
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, confusion_matrix
@@ -387,14 +388,15 @@ def plot_and_save_all(
     coverage = gbc_res["inside_mask"].astype(np.float32).reshape(H, W)
     ax4 = fig.add_subplot(gs[1, 0])
     im4 = ax4.imshow(coverage, cmap="Greens", vmin=0, vmax=1)
-    ax4.set_title(f"5. GBC Ball Coverage ($d^2 \le 1.0$)\n({metrics['ball_coverage_pct']:.1f}% pixels inside)", fontsize=11, fontweight="bold")
+    ax4.set_title(f"5. GBC Ball Coverage ($d^2 \\leq 1.0$)\n({metrics['ball_coverage_pct']:.1f}% pixels inside)",
+                  fontsize=11, fontweight="bold")
     ax4.axis("off")
     plt.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04)
 
     # (1, 1) GBC Membership Confidence Map
     ax5 = fig.add_subplot(gs[1, 1])
     im5 = ax5.imshow(gbc_res["confidence"].reshape(H, W), cmap="viridis", vmin=0, vmax=1)
-    ax5.set_title("6. GBC Membership Confidence\n($\max_k \\alpha_{i,k}$)", fontsize=11, fontweight="bold")
+    ax5.set_title("6. GBC Membership Confidence\n($\\max_k \\alpha_{i,k}$)", fontsize=11, fontweight="bold")
     ax5.axis("off")
     plt.colorbar(im5, ax=ax5, fraction=0.046, pad=0.04)
 
@@ -411,7 +413,7 @@ def plot_and_save_all(
     cluster_idx = np.arange(K)
     bars = ax7.bar(cluster_idx, shifts, color="royalblue", edgecolor="black", alpha=0.8)
     ax7.axhline(np.mean(shifts), color="red", linestyle="--", label=f"Mean: {np.mean(shifts):.3f}")
-    ax7.set_title("8. Centroid Drift per Cluster\n($\|\mathbf{c}_k^* - \mathbf{c}_k\|_2$)", fontsize=11, fontweight="bold")
+    ax7.set_title("8. Centroid Drift per Cluster\n($\\|\\mathbf{c}_k^* - \\mathbf{c}_k\\|_2$)", fontsize=11, fontweight="bold")
     ax7.set_xlabel("Cluster ID", fontsize=10)
     ax7.set_ylabel("L2 Shift", fontsize=10)
     ax7.set_xticks(cluster_idx)
@@ -558,7 +560,7 @@ def plot_and_save_all(
     # 05 Coverage
     fig_ind, ax = plt.subplots(figsize=(6, 5), dpi=200)
     im = ax.imshow(coverage, cmap="Greens", vmin=0, vmax=1)
-    ax.set_title("GBC Granular Ball Coverage ($d^2 \le 1.0$)")
+    ax.set_title("GBC Granular Ball Coverage ($d^2 \\leq 1.0$)")
     ax.axis("off")
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig_ind.savefig(os.path.join(fig_dir, "05_gbc_ball_coverage.png"), bbox_inches="tight")
@@ -567,7 +569,7 @@ def plot_and_save_all(
     # 06 Confidence
     fig_ind, ax = plt.subplots(figsize=(6, 5), dpi=200)
     im = ax.imshow(gbc_res["confidence"].reshape(H, W), cmap="viridis", vmin=0, vmax=1)
-    ax.set_title("GBC Membership Confidence ($\max_k \\alpha_k$)")
+    ax.set_title("GBC Membership Confidence ($\\max_k \\alpha_k$)")
     ax.axis("off")
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig_ind.savefig(os.path.join(fig_dir, "06_gbc_confidence.png"), bbox_inches="tight")
@@ -586,7 +588,7 @@ def plot_and_save_all(
     fig_ind, ax = plt.subplots(figsize=(7, 4), dpi=200)
     ax.bar(cluster_idx, shifts, color="royalblue", edgecolor="black", alpha=0.8)
     ax.axhline(np.mean(shifts), color="red", linestyle="--", label=f"Mean: {np.mean(shifts):.3f}")
-    ax.set_title("Centroid Drift per Cluster ($\|\mathbf{c}_k^* - \mathbf{c}_k\|_2$)")
+    ax.set_title("Centroid Drift per Cluster ($\\|\\mathbf{c}_k^* - \\mathbf{c}_k\\|_2$)")
     ax.set_xlabel("Cluster ID")
     ax.set_ylabel("L2 Shift")
     ax.set_xticks(cluster_idx)
