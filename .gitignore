@@ -121,3 +121,6 @@ CLAUDE.md
 AGENTS.md
 
 ./nnUNet_eds400_pre.sh
+npy_to_onnx.py
+onnx_to_engine.py
+pth_to_onnx.py
