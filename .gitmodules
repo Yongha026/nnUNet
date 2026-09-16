@@ -1,0 +1,3 @@
+[submodule "torch_kmeans"]
+path = torch_kmeans
+url = https://github.com/jokofa/torch_kmeans.git
