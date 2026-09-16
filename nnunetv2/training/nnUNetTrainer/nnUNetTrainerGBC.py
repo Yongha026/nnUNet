@@ -143,7 +143,7 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         return {'loss': l.detach().cpu().numpy()}
 
 
-class nnUNetTrainerGBC_S(nnUNetTrainerGBC):
+class nnUNetTrainerGBC_S_32(nnUNetTrainerGBC):
     @staticmethod
     def build_network_architecture(plans_manager: PlansManager,
                                    configuration_manager: ConfigurationManager,
@@ -194,21 +194,42 @@ class nnUNetTrainerGBC_S_64(nnUNetTrainerGBC):
             img_size=img_size,
             gbc_num_balls=64,
         )
-# class GBC_Rolling_Unet_L(nn.Module):
-#     def __init__(self, num_classes, input_channels=3, deep_supervision=False, img_size=224,
-#                  embed_dims=[64, 128, 256, 512, 1024],
-#                  num_heads=[1, 2, 4, 8], qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-#                  drop_path_rate=0., norm_layer=nn.LayerNorm, depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1],
-#                  gbc_num_balls=32, gbc_proj_dim=None, use_diag_cov=True, tau=1.0, **kwargs):
-#         super().__init__()
 
-# class MambaLiteUNet(nn.Module):
-#     def __init__(
-#         self,
-#         num_classes=1,
-#         input_channels=3,
-#         c_list=[16, 32, 48, 64, 96, 128]
-#     ):
+class nnUNetTrainerGBC_S_4(nnUNetTrainerGBC):
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return GBC_Rolling_Unet_S(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            img_size=img_size,
+            gbc_num_balls=4,
+        )
+
+class nnUNetTrainerGBC_S_2(nnUNetTrainerGBC):
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return GBC_Rolling_Unet_S(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            img_size=img_size,
+            gbc_num_balls=2,
+        )
 
 class nnUNetTrainerGBC_M(nnUNetTrainerGBC):
     @staticmethod

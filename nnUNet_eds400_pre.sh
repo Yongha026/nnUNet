@@ -11,7 +11,7 @@ export nnUNet_extTrainer="/home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/
 
 # 3. Weights & Biases Logging Settings
 export nnUNet_wandb_enabled=1
-export nnUNet_wandb_project="MambaLiteUNet"
+export nnUNet_wandb_project="AD-GBC_OpenEDS"
 export WANDB_MODE=online
 
 # 4. Model Training Tweaks
@@ -30,6 +30,6 @@ echo "nnUNet_extTrainer:  $nnUNet_extTrainer"
 echo "WandB Project:      $nnUNet_wandb_project (Enabled: $nnUNet_wandb_enabled)"
 echo "Target GPU:         Device $CUDA_VISIBLE_DEVICES"
 echo "=============================================== commands ================================================"
-echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerMLU_Run > nnUNet_mlu_v1.log 2>&1 &"
+echo "nohup nnUNetv2_train 400 2d 0 -tr nnUNetTrainerGBC_S_16 > GBC_S_400_16.log 2>&1 &"
 echo "nnUNetv2_predict -i ./nnUNet_test_imgs/ -o ./nnUNet_infer_res/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
 echo "nnUNetv2_predict -i /mnt/hdd1/nnunetv2_swir/images/ -o /mnt/hdd1/nnunetv2_swir/labels/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
