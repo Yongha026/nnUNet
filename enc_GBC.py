@@ -365,12 +365,13 @@ class GBC_S_EncDec(nn.Module):
             If return_details is False (default):
                 (out, enc_feature, dec_feature)
             If return_details is True:
-                (out, t3, t3_gbc, att_t3, dec_feature)
+                (out, t3, t3_gbc, att_t3, dec_feature,sigma,enc_balls_centers)
                   - t3:      Pre-GBC encoder feature  [B, 64, 48, 48]
                   - t3_gbc:  Post-GBC encoder feature [B, 64, 48, 48]
                   - att_t3:  Soft membership weights  [B, H*W, K]
                   - dec_feature: Decoder feature      [B, 64, 48, 48]
                   - sigma:   Granular ball radii      [B,  N, 16, 64]
+                  - enc_balls_centers: Encoder balls  [16, 64]
         """
         B = x.shape[0]
 
