@@ -1,0 +1,45 @@
+$ nnUNetv2_train 250 2d 0 -tr nnUNetTrainerDGBC_S_4 -pretrained_weights /mnt/hdd1/nnunetv2_openEDS/nnUNet_results/Dataset250_OpenEDS2019/nnUNetTrainerGBC_S_4__nnUNetPlans__2d/fold_0/checkpoint_best.pth
+
+############################
+INFO: You are using the old nnU-Net default plans. We have updated our recommendations. Please consider using those instead! Read more here: https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/resenc_presets.md
+############################
+
+Trainer 'nnUNetTrainerDGBC_S_4' not found in nnunetv2.training.nnUNetTrainer.
+Searching in external trainer paths from environment variable 'nnUNet_extTrainer'...
+Searching in: /home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/nnUNetTrainer
+Searching for class nnUNetTrainerDGBC_S_4 in folder /home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/nnUNetTrainer with current module None
+  Inspecting module: GBC_utils
+  Inspecting module: arch_nnUNetPlans
+  Inspecting module: archs_GBC
+/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+  Inspecting module: archs_LBUNet
+  Inspecting module: archs_MambaLiteUNet
+  Inspecting module: archs_PMRNet
+  Inspecting module: archs_UKAN
+  Inspecting module: archs_ULVMUNet
+  Inspecting module: archs_ritnet
+  Inspecting module: archs_unetpp
+  Inspecting module: archs_unext
+  Inspecting module: kan
+  Inspecting module: nnUNeTrainerGBC_FT
+Found class nnUNetTrainerDGBC_S_4 in nnUNeTrainerGBC_FT
+Using trainer 'nnUNetTrainerDGBC_S_4' from: /home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/nnUNetTrainer
+Traceback (most recent call last):
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/bin/nnUNetv2_train", line 6, in <module>
+    sys.exit(run_training_entry())
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/nnunetv2/run/run_training.py", line 259, in run_training_entry
+    run_training(args.dataset_name_or_id, args.configuration, args.fold, args.tr, args.p, args.pretrained_weights,
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/nnunetv2/run/run_training.py", line 185, in run_training
+    nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name,
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/nnunetv2/run/run_training.py", line 53, in get_trainer_from_args
+    preprocessed_dataset_folder_base = join(nnUNet_preprocessed, maybe_convert_to_dataset_name(dataset_name_or_id))
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/nnunetv2/utilities/dataset_name_id_conversion.py", line 75, in maybe_convert_to_dataset_name
+    return convert_id_to_dataset_name(dataset_name_or_id)
+  File "/home/iulab9/miniconda3/envs/nnunet_mlu/lib/python3.10/site-packages/nnunetv2/utilities/dataset_name_id_conversion.py", line 49, in convert_id_to_dataset_name
+    raise RuntimeError(f"Could not find a dataset with the ID {dataset_id}. Make sure the requested dataset ID "
+RuntimeError: Could not find a dataset with the ID 250. Make sure the requested dataset ID exists and that nnU-Net knows where raw and preprocessed data are located (see Documentation - Installation). Here are your currently defined folders:
+nnUNet_preprocessed=/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_preprocessed
+nnUNet_results=/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_results
+nnUNet_raw=/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_raw
+If something is not right, adapt your environment variables.

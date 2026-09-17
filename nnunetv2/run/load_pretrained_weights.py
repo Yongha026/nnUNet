@@ -34,28 +34,37 @@ def load_pretrained_weights(network, fname, verbose=False):
         mod = mod._orig_mod
 
     model_dict = mod.state_dict()
+
+    # Adapt anisotropic log_sigma to hyperspheric log_radius if needed
+    if 'gbc.log_sigma' in pretrained_dict and 'gbc.log_radius' in model_dict:
+        sigma = pretrained_dict['gbc.log_sigma']
+        if sigma.shape[0] == model_dict['gbc.log_radius'].shape[0]:
+            pretrained_dict['gbc.log_radius'] = sigma.mean(dim=-1, keepdim=True)
+            if verbose:
+                print(f"[*] Adapted gbc.log_sigma {tuple(sigma.shape)} -> gbc.log_radius {tuple(pretrained_dict['gbc.log_radius'].shape)}")
+
     # verify that all but the segmentation layers have the same shape
     for key, _ in model_dict.items():
         if all([i not in key for i in skip_strings_in_pretrained]):
-            assert key in pretrained_dict, \
-                f"Key {key} is missing in the pretrained model weights. The pretrained weights do not seem to be " \
-                f"compatible with your network."
-            assert model_dict[key].shape == pretrained_dict[key].shape, \
-                f"The shape of the parameters of key {key} is not the same. Pretrained model: " \
-                f"{pretrained_dict[key].shape}; your network: {model_dict[key]}. The pretrained model " \
-                f"does not seem to be compatible with your network."
-
-    # fun fact: in principle this allows loading from parameters that do not cover the entire network. For example pretrained
-    # encoders. Not supported by this function though (see assertions above)
-
-    # commenting out this abomination of a dict comprehension for preservation in the archives of 'what not to do'
-    # pretrained_dict = {'module.' + k if is_ddp else k: v
-    #                    for k, v in pretrained_dict.items()
-    #                    if (('module.' + k if is_ddp else k) in model_dict) and
-    #                    all([i not in k for i in skip_strings_in_pretrained])}
+            if key not in pretrained_dict:
+                if key.startswith('gbc.'):
+                    print(f"[!] Warning: GBC key '{key}' not in pretrained checkpoint; preserving fresh initialization.")
+                    continue
+                assert key in pretrained_dict, \
+                    f"Key {key} is missing in the pretrained model weights. The pretrained weights do not seem to be " \
+                    f"compatible with your network."
+            if model_dict[key].shape != pretrained_dict[key].shape:
+                if key.startswith('gbc.'):
+                    print(f"[!] Warning: GBC shape mismatch for '{key}' (target: {tuple(model_dict[key].shape)} vs ckpt: {tuple(pretrained_dict[key].shape)}); preserving fresh initialization.")
+                    continue
+                assert model_dict[key].shape == pretrained_dict[key].shape, \
+                    f"The shape of the parameters of key {key} is not the same. Pretrained model: " \
+                    f"{pretrained_dict[key].shape}; your network: {model_dict[key]}. The pretrained model " \
+                    f"does not seem to be compatible with your network."
 
     pretrained_dict = {k: v for k, v in pretrained_dict.items()
-                       if k in model_dict.keys() and all([i not in k for i in skip_strings_in_pretrained])}
+                       if k in model_dict.keys() and all([i not in k for i in skip_strings_in_pretrained])
+                       and model_dict[k].shape == v.shape}
 
     model_dict.update(pretrained_dict)
 

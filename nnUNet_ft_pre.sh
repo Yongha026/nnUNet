@@ -2,9 +2,9 @@
 # source nnUNet_preliminary.sh to run
 
 # 1. Standard nnU-Net Paths
-export nnUNet_raw="/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_raw"
-export nnUNet_preprocessed="/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_preprocessed"
-export nnUNet_results="/mnt/hdd1/nnunetv2_openEDS_400/nnUNet_results"
+export nnUNet_raw="/mnt/hdd1/nnunetv2_openEDS/nnUNet_raw"
+export nnUNet_preprocessed="/mnt/hdd1/nnunetv2_openEDS/nnUNet_preprocessed"
+export nnUNet_results="/mnt/hdd1/nnunetv2_openEDS/nnUNet_results"
 
 # 2. Custom Trainer Code Integration
 export nnUNet_extTrainer="/home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/nnUNetTrainer"
@@ -30,7 +30,6 @@ echo "nnUNet_extTrainer:  $nnUNet_extTrainer"
 echo "WandB Project:      $nnUNet_wandb_project (Enabled: $nnUNet_wandb_enabled)"
 echo "Target GPU:         Device $CUDA_VISIBLE_DEVICES"
 echo "=============================================== commands ================================================"
-echo "nohup nnUNetv2_train 400 2d 0 -tr nnUNetTrainerGBC_S_16 > GBC_S_400_16.log 2>&1 &"
 echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerGBC_FT --pretrained_weights PATH_TO_CKPT > GBC_##_FT.log 2>&1 &"
 echo "nnUNetv2_predict -i /mnt/hdd1/nnunetv2_swir/images/ -o /mnt/hdd1/nnunetv2_swir/labels/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
 

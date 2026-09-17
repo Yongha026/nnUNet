@@ -38,32 +38,55 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         self.weight_decay = 0.01
         self.num_epochs = 10  # Finetune for 10 epochs maybe
 
-    def configure_optimizers(self):
-        # Use AdamW as recommended for hybrid Transformer/MLP architectures (SGD at 0.01 often diverges)
-        optimizer = torch.optim.AdamW(
-            self.network.parameters(),
-            lr=self.initial_lr,
-            weight_decay=self.weight_decay
-        )
-        # Cosine Annealing scheduler (as used in the Rolling-UNet paper)
-        from torch.optim.lr_scheduler import CosineAnnealingLR
-        lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.num_epochs, eta_min=1e-6)
-        return optimizer, lr_scheduler
-    def set_deep_supervision_enabled(self, enabled: bool):
-        pass
-
     def _get_actual_network(self) -> nn.Module:
         net = self.network
         if hasattr(net, 'module'):  # DDP wrapping
             net = net.module
         if isinstance(net, OptimizedModule):  # torch.compile wrapping
             net = net._orig_mod
-
-        # Freeze UNet for finetuning GBC params only
-        for name, param in net.named_parameters():
-            if not "gbc" in name:param.requires_grad = False
-            else: param.requires_grad = True
         return net
+
+    def freeze_backbone(self):
+        """Freezes all non-GBC backbone parameters and sets their BatchNorm layers to eval mode."""
+        net = self._get_actual_network()
+        for name, module in net.named_children():
+            if name != "gbc":
+                module.eval()
+                for param in module.parameters():
+                    param.requires_grad = False
+            else:
+                module.train()
+                for param in module.parameters():
+                    param.requires_grad = True
+
+    def configure_optimizers(self):
+        # Enforce backbone freezing before registering optimizer parameters
+        self.freeze_backbone()
+        trainable_params = [p for p in self.network.parameters() if p.requires_grad]
+        trainable_count = sum(p.numel() for p in trainable_params)
+        total_count = sum(p.numel() for p in self.network.parameters())
+        self.print_to_log_file(
+            f"[*] GBC Fine-Tuning Setup: {total_count - trainable_count:,} backbone params frozen, "
+            f"{trainable_count:,} GBC params trainable."
+        )
+
+        # AdamW for hybrid architecture with only trainable GBC parameters
+        optimizer = torch.optim.AdamW(
+            trainable_params,
+            lr=self.initial_lr,
+            weight_decay=self.weight_decay
+        )
+        from torch.optim.lr_scheduler import CosineAnnealingLR
+        lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.num_epochs, eta_min=1e-6)
+        return optimizer, lr_scheduler
+
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
+        # Re-enforce eval mode on frozen modules to prevent BatchNorm running stats drift
+        self.freeze_backbone()
+
+    def set_deep_supervision_enabled(self, enabled: bool):
+        pass
 
     def compute_gbc_losses(self, loss_intermediates: dict, net_module: nn.Module) -> Tuple[torch.Tensor, torch.Tensor]:
         model_gbc = net_module.gbc
@@ -71,9 +94,12 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         K = centers.shape[0]
 
         # 1. Wasserstein-based Diversity Loss (prevent center collapse)
-        dist_matrix = torch.cdist(centers, centers, p=2)  # (K, K)
-        mask = ~torch.eye(K, dtype=torch.bool, device=centers.device)
-        l_div = torch.exp(-dist_matrix)[mask].mean()
+        if K > 1:
+            dist_matrix = torch.cdist(centers, centers, p=2)  # (K, K)
+            mask = ~torch.eye(K, dtype=torch.bool, device=centers.device)
+            l_div = torch.exp(-dist_matrix)[mask].mean()
+        else:
+            l_div = torch.tensor(0.0, device=centers.device)
 
         # 2. Scale / Radius-Dispersion Consistency Loss
         if hasattr(model_gbc, 'log_sigma') and model_gbc.log_sigma is not None:
@@ -96,8 +122,14 @@ class nnUNetTrainerGBC(nnUNetTrainer):
                 den = att.sum(dim=1).unsqueeze(-1) + 1e-6  # (B, K, 1)
                 weighted_dispersion = num / den  # (B, K, d)
 
+                # For hypersphere (scalar radius), average coordinate dispersion along feature dimension d
+                if sigma_sq.shape[-1] == 1:
+                    target_dispersion = weighted_dispersion.mean(dim=-1, keepdim=True)  # (B, K, 1)
+                else:
+                    target_dispersion = weighted_dispersion  # (B, K, d)
+
                 # Mean squared error between dispersion and scale
-                l_s = torch.mean((weighted_dispersion - sigma_sq.unsqueeze(0)) ** 2)
+                l_s = torch.mean((target_dispersion - sigma_sq.unsqueeze(0)) ** 2)
                 losses_scale.append(l_s)
 
         l_scale = torch.mean(torch.stack(losses_scale)) if losses_scale else torch.tensor(0.0, device=centers.device)
@@ -134,15 +166,16 @@ class nnUNetTrainerGBC(nnUNetTrainer):
                 output = net_outputs
                 l = self.loss(output, target)
 
+        trainable_params = [p for p in self.network.parameters() if p.requires_grad]
         if self.grad_scaler is not None:
             self.grad_scaler.scale(l).backward()
             self.grad_scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
+            torch.nn.utils.clip_grad_norm_(trainable_params, 12)
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
         else:
             l.backward()
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
+            torch.nn.utils.clip_grad_norm_(trainable_params, 12)
             self.optimizer.step()
 
         return {'loss': l.detach().cpu().numpy()}

@@ -1,0 +1,38 @@
+{
+    "none": {
+        "ari_gbc_vs_km_conv": -0.0016282916219234396,
+        "nmi_gbc_vs_km_conv": 0.03013505304330005,
+        "agreement_pct_gbc_vs_km_conv": 16.710069444444446,
+        "active_clusters_gbc": 10,
+        "active_clusters_km_conv": 10,
+        "ball_coverage_pct_r1": 0.0,
+        "ball_coverage_pct_r2": 0.0,
+        "median_dist2": 37.44209671020508,
+        "mean_centroid_shift": 4.278556689620018,
+        "max_centroid_shift": 5.57448148727417
+    },
+    "zscore": {
+        "ari_gbc_vs_km_conv": 0.011160806122638117,
+        "nmi_gbc_vs_km_conv": 0.07844551115199123,
+        "agreement_pct_gbc_vs_km_conv": 14.019097222222221,
+        "active_clusters_gbc": 10,
+        "active_clusters_km_conv": 16,
+        "ball_coverage_pct_r1": 0.0,
+        "ball_coverage_pct_r2": 0.0,
+        "median_dist2": 37.442169189453125,
+        "mean_centroid_shift": 14.464542210102081,
+        "max_centroid_shift": 16.927616119384766
+    },
+    "unit": {
+        "ari_gbc_vs_km_conv": 0.0,
+        "nmi_gbc_vs_km_conv": 0.0,
+        "agreement_pct_gbc_vs_km_conv": 15.928819444444445,
+        "active_clusters_gbc": 1,
+        "active_clusters_km_conv": 9,
+        "ball_coverage_pct_r1": 0.0,
+        "ball_coverage_pct_r2": 0.0,
+        "median_dist2": 16.077735900878906,
+        "mean_centroid_shift": 1.0959548652172089,
+        "max_centroid_shift": 1.1941229104995728
+    }
+}
