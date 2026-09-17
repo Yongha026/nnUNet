@@ -43,7 +43,7 @@ class MetaLogger(object):
         self.resume = resume
         self.loggers = []
         self.local_logger = LocalLogger(verbose)
-        if self._is_logger_enabled("nnUNet_wandb_enabled"):
+        if self._is_logger_enabled("nnUNet_wandb_enabled") or os.getenv("nnUNet_wandb_name") is not None:
             self.loggers.append(WandbLogger(output_folder, resume))
 
     def update_config(self, config: dict):
@@ -257,6 +257,7 @@ class WandbLogger:
         self.resume = resume
         self.project = os.getenv("nnUNet_wandb_project", "nnunet")
         self.mode = os.getenv("nnUNet_wandb_mode", "online")
+        self.name = os.getenv("nnUNet_wandb_name", None)
 
         wandb_id = None
         if (self.output_folder / "wandb").is_dir():
@@ -268,7 +269,14 @@ class WandbLogger:
                 shutil.rmtree(str(self.output_folder / "wandb"))
 
         _resume = "allow" if self.resume else "never"
-        self.run = wandb.init(project=self.project, dir=str(self.output_folder), id=wandb_id, mode=self.mode, resume=_resume)
+        self.run = wandb.init(
+            project=self.project,
+            dir=str(self.output_folder),
+            id=wandb_id,
+            mode=self.mode,
+            resume=_resume,
+            name=self.name,
+        )
         self.run.config.update({"JobID": get_cluster_job_id()})
         self.wandb_init_step = self.run.step
 

@@ -96,6 +96,28 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         self.weight_decay = 0.01
         self.num_epochs = 10  # Finetune for 10 epochs maybe
 
+        # Ensure W&B run name is set and WandbLogger is attached if nnUNet_wandb_name is exported
+        wandb_name = os.getenv("nnUNet_wandb_name")
+        if wandb_name is not None:
+            try:
+                import wandb
+                if wandb is not None:
+                    if wandb.run is not None:
+                        wandb.run.name = wandb_name
+                        wandb.run.save()
+                        self.print_to_log_file(f"[*] Set existing W&B run name to: {wandb_name}")
+                    else:
+                        from nnunetv2.training.logging.nnunet_logger import WandbLogger
+                        continue_training = plans.get("continue_training", False)
+                        wandb_logger = WandbLogger(self.output_folder, continue_training)
+                        if wandb.run is not None:
+                            wandb.run.name = wandb_name
+                            wandb.run.save()
+                        self.logger.loggers.append(wandb_logger)
+                        self.print_to_log_file(f"[*] Attached WandbLogger with run name: {wandb_name}")
+            except Exception as e:
+                self.print_to_log_file(f"[!] Warning: Could not setup W&B logger: {e}")
+
     def _get_actual_network(self) -> nn.Module:
         net = self.network
         if hasattr(net, 'module'):  # DDP wrapping
