@@ -7,27 +7,44 @@ except (ImportError, ValueError):
     from GBC_utils import *
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
-from torch_kmeans import SoftKMeans
+from torch_kmeans import SoftKMeans, CosineSimilarity
 
 # __all__ = ['GBC_Rolling_Unet_S', 'GBC_Rolling_Unet_M', 'GBC_Rolling_Unet_L', 'Rolling_Unet_L']
 
 # TODO: GBC clustering만 Soft K-Means로 바꾸기. GBC self.centers로 K-means init, 그 이후론 K-means가 알아서 중심 옮겨가며 cluster.
 # 이 때, Isotropic Granular ball과 K-means의 차이는?
-class GranularBall(nn.Module):
-    def __init__(self, in_ch, num_balls=32, proj_dim=None, use_residual=True, use_diag_cov=True, tau=1.0):
+__all__ = ['KMeansBlock', 'KMeans_Rolling_Unet_S', 'GranularBall', 'GBC_Rolling_Unet_S']
+
+
+class KMeansBlock(nn.Module):
+    """
+    Feature clustering block using differentiable Soft K-Means (torch_kmeans).
+    Anchor centers (self.centers) act as learnable priors and initial seeds for Soft K-Means.
+    Centroids are dynamically adapted to each sample's features via EM iterations.
+    Features are reconstructed via soft broadcasting: hat{z} = alpha @ C_final.
+    """
+    def __init__(self, in_ch, num_clusters=16, proj_dim=None, use_residual=True,
+                 max_iter=5, temp=5.0, **kwargs):
         super().__init__()
         self.in_ch = in_ch
         self.proj_dim = proj_dim or in_ch
-        self.num_balls = num_balls
+        self.num_clusters = num_clusters
         self.use_residual = use_residual
-        self.use_diag_cov = use_diag_cov
-        self.tau = tau
+        self.max_iter = max_iter
+        self.temp = temp
 
-        self.centers = nn.Parameter(torch.randn(num_balls, self.proj_dim) * 0.01)
-        if use_diag_cov:
-            self.log_sigma = nn.Parameter(torch.zeros(num_balls, self.proj_dim))  # diag std = Anisotropic
-        else:
-            self.log_radius = nn.Parameter(torch.zeros(num_balls, 1))  # scalar std = Hypersphere
+        # Global learnable anchor centers acting as cluster priors
+        self.centers = nn.Parameter(torch.randn(num_clusters, self.proj_dim) * 0.01)
+
+        # Soft K-Means clustering with CosineSimilarity
+        self.kmeans = SoftKMeans(
+            n_clusters=num_clusters,
+            max_iter=max_iter,
+            num_init=1,
+            distance=CosineSimilarity,
+            temp=temp,
+            verbose=False,
+        )
 
         if self.proj_dim != in_ch:
             self.proj_in = nn.Conv2d(in_ch, self.proj_dim, 1, bias=True)
@@ -43,30 +60,26 @@ class GranularBall(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-    def forward(self, x, tau=1.0):
+    def forward(self, x):
         B, C, H, W = x.shape
         z = self.bn_in(self.proj_in(x)) if self.proj_in is not None else x  # 차원 안 맞으면 1x1Conv
         d = z.shape[1]  # 1x1Conv한 후에 Dim = d(안했으면 C겠지)
-        z_flat = z.view(B, d, H * W).permute(0, 2, 1)  # (B,N,d)
+        z_flat = z.view(B, d, H * W).permute(0, 2, 1).contiguous()  # (B, N, d)
 
         # 논문에서 Forward 부분 정리한 대로 따라감.
         # 차원 다르면 1x1 Conv해서 차원 맞춘 input feature map z flatten(BxNxD)
-        # d_{i,k} = ||(z_i-c_k) [element-wise div] sigma||^2_2
-        # c : GB anchor center, sigma : GB anchor radii
-        dif = z_flat.unsqueeze(2) - self.centers.unsqueeze(0).unsqueeze(0)  # (B,N,K,d)
+        # c : GB anchor center
 
-        # Softplus = log(1+exp(x))
-        # sigma>0 보장하고 미분 편하게.
-        if self.use_diag_cov:
-            sigma = (F.softplus(self.log_sigma) + 1e-6).unsqueeze(0).unsqueeze(0)  # (1,1,K,d)
-        else:
-            sigma = (F.softplus(self.log_radius) + 1e-6).unsqueeze(0).unsqueeze(0)  # (1,1,K,1)
-        dif_scaled = dif / sigma  # Broadcasted
-        dist2 = (dif_scaled ** 2).sum(-1)  # (B,N,K)
+        # Expand learnable anchor centers across the batch (GBC self.centers로 K-means init)
+        init_centers = self.centers.unsqueeze(0).expand(B, -1, -1).contiguous()  # (B, K, d)
 
-        # 논문에서는 alpha_{i,k}
-        # Ball k에 소속될 pixel z_i의 soft weight.
-        att = F.softmax(-dist2 / max(1e-6, tau), dim=-1)  # Soft membership = Fuzzy assignment weights
+        # Execute differentiable Soft K-Means (알아서 중심 옮겨가며 cluster)
+        result = self.kmeans(z_flat, k=self.num_clusters, centers=init_centers)
+
+        # Dynamic sample centroids: (B, K, d)
+        dynamic_centers = result.centers
+        # Soft assignment probabilities: (B, N, K) - 논문에서는 alpha_{i,k} (Ball k에 소속될 pixel z_i의 soft weight)
+        att = result.soft_assignment
 
         # alpha center(att된 z들)가 논문에서는 Broadcast(Ball -> Set)
         # 근데 왜 Aggregation 부분 없냐고 십탱
@@ -92,14 +105,28 @@ class GranularBall(nn.Module):
         # In the wild에서는 이미 데이터들 보다보면 클러스터 돼있을거라 가정, 굳이 픽셀들 이용해서 cluster 구하지 않는다(걔네도 몰라)
         # 클러스터 있을거라 가정하고 Parameters로 뿌려놓고 걔네 학습해가며 사용.
         # => 실제 구현에서는 굳이 Aggregation 필요 없다. 추정해놓은 클러스터에서 Broadcasting만 사용
-        recon_flat = torch.matmul(att, self.centers)  # (B,N,d)
+
+        # [K-Means 구현]: Soft K-Means의 EM 단계에서 샘플 특징(z_flat)을 집계해 dynamic_centers(Aggregation)를 갱신하고,
+        # 갱신된 dynamic_centers와 soft assignment alpha를 통해 최종 feature를 재구성(Broadcasting)
+        recon_flat = torch.bmm(att, dynamic_centers)  # (B, N, d)
         recon = recon_flat.permute(0, 2, 1).view(B, d, H, W)
 
         if self.proj_out is not None:
             recon = self.bn_out(self.proj_out(recon))
 
         out = recon + x if self.use_residual else recon
-        return self.refine(out), att, sigma, dif
+        out = self.refine(out)
+
+        # Clustering distortion (inertia) loss: (1.0 - cosine_similarity)
+        # result.inertia contains the cosine similarity matrix (B, N, K)
+        cos_sim = result.inertia
+        distortion = torch.sum(att * (1.0 - cos_sim), dim=-1).mean()
+
+        return out, att, dynamic_centers, distortion
+
+
+# Backward-compatible alias
+GranularBall = KMeansBlock
 
 
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
@@ -321,13 +348,20 @@ class D_DoubleConv(nn.Module):
         return self.conv(input)
 
 
-class GBC_Rolling_Unet_S(nn.Module):
+class KMeans_Rolling_Unet_S(nn.Module):
     def __init__(self, num_classes, input_channels=3, deep_supervision=False, img_size=224,
                  embed_dims=[16, 32, 64, 128, 256],
                  num_heads=[1, 2, 4, 8], qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1],
-                 gbc_num_balls=16, gbc_proj_dim=None, use_diag_cov=True, tau=1.0, **kwargs):
+                 num_clusters=16, proj_dim=None, max_iter=5, temp=5.0,
+                 gbc_num_balls=None, gbc_proj_dim=None, **kwargs):
         super().__init__()
+
+        # Handle backward-compatible arguments
+        if gbc_num_balls is not None:
+            num_clusters = gbc_num_balls
+        if gbc_proj_dim is not None:
+            proj_dim = gbc_proj_dim
 
         self.embed_dims = embed_dims
         self.conv1 = DoubleConv(input_channels, embed_dims[0])
@@ -376,9 +410,16 @@ class GBC_Rolling_Unet_S(nn.Module):
 
         self.final = nn.Conv2d(8, num_classes, kernel_size=1)
 
-        proj_dim_actual = gbc_proj_dim if gbc_proj_dim and gbc_proj_dim > 0 else embed_dims[2]
-        self.gbc = GranularBall(in_ch=embed_dims[2], num_balls=gbc_num_balls, proj_dim=proj_dim_actual,
-                                use_diag_cov=use_diag_cov, use_residual=True, tau=tau)
+        proj_dim_actual = proj_dim if proj_dim and proj_dim > 0 else embed_dims[2]
+        self.kmeans_block = KMeansBlock(
+            in_ch=embed_dims[2],
+            num_clusters=num_clusters,
+            proj_dim=proj_dim_actual,
+            use_residual=True,
+            max_iter=max_iter,
+            temp=temp
+        )
+        self.gbc = self.kmeans_block  # Backward-compatible alias for trainer inspection
 
     def forward(self, x):
         B = x.shape[0]
@@ -393,8 +434,8 @@ class GBC_Rolling_Unet_S(nn.Module):
         out = self.conv3(out)
         t3 = out
 
-        t3_gbc, att_t3, _, dif_t3 = self.gbc(t3)
-        out = self.pool3(t3_gbc)
+        t3_km, att_t3, _, dif_t3 = self.kmeans_block(t3)
+        out = self.pool3(t3_km)
 
         ### Stage 4
         out, H, W = self.FIBlock1(out)
@@ -426,9 +467,8 @@ class GBC_Rolling_Unet_S(nn.Module):
         out = F.interpolate(F.relu(self.dbn4(self.FIBlock4(out))), scale_factor=(2, 2), mode='bilinear')
 
         ### Conv Stage
-        # out = torch.add(out, t3)
-        out, att_out, _, dif_out = self.gbc(out)
-        out = torch.add(out, t3_gbc)  # 与经过GBC处理的t3进行跳跃连接
+        out, att_out, _, dif_out = self.kmeans_block(out)
+        out = torch.add(out, t3_km)  # Skip connection with KMeans-clustered t3
 
         out = F.interpolate(self.decoder3(out), scale_factor=(2, 2), mode='bilinear')
         out = torch.add(out, t2)
@@ -439,12 +479,14 @@ class GBC_Rolling_Unet_S(nn.Module):
         out = self.final(out)
 
         if self.training:
-            # 将所有计算loss所需的中间变量打包
             loss_intermediates = {
-                "att_1": att_t3, "dif_1": dif_t3,
-                "att_2": att_out, "dif_2": dif_out
+                "att_1": att_t3, "dif_1": dif_t3, "inertia_1": dif_t3,
+                "att_2": att_out, "dif_2": dif_out, "inertia_2": dif_out
             }
             return out, loss_intermediates
         else:
-            # 在评估/推理时，只返回分割结果
             return out
+
+
+# Backward-compatible alias
+GBC_Rolling_Unet_S = KMeans_Rolling_Unet_S

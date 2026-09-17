@@ -25,6 +25,7 @@ def load_pretrained_weights(network, fname, verbose=False):
     skip_strings_in_pretrained = [
         '.seg_layers.',
         'gbc.',
+        'kmeans_block.',
     ]
 
     if isinstance(network, DDP):
