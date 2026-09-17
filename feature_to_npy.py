@@ -45,45 +45,48 @@ except Exception as e:
     raise e
 model.eval()
 
-# Get images
-transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize([0.5], [0.5]),
-        ])
-clahe = cv2.createCLAHE(
-    clipLimit=1.5, tileGridSize=(8, 8)
-)
-def get_img(img_path: str) -> torch.Tensor:
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    img_resized = cv2.resize(img, (192,192),cv2.INTER_AREA)
-    table = float(255) * (np.linspace(0, 1, 256) ** 0.8)
-    img_gamma = cv2.LUT(img_resized.astype(np.uint8), table.astype(np.uint8))
-    img_clahe = clahe.apply(img_gamma)
-    pil_img = PIL.Image.fromarray(img_clahe)
-    return transform(pil_img).unsqueeze(0).to(device)
-
-openeds_1 = get_img("./dataset_images/openeds_1.png")
-# openeds_2 = get_img("./dataset_images/openeds_2.png")
-# pupil = get_img("./dataset_images/pupil.png")
-# swirski = get_img("./dataset_images/swirski.png")
-
-# sigma => torch.Size([1, 1, 16, 64]) : B, N, num_balls, features space dim
-# ball centers => torch.Size([16, 64]): num_balls, coordinates
-
-# 필요한 정보: 1. Encoder features(GBC이전)=t3 2. GB 중심 3. GB radii
-# (out, t3, t3_gbc, att_t3, dec_feature,sigma,enc_balls_centers)
-_,t3_eds1,_,_,_,sigma_eds1,enc_centers_eds1 = model(openeds_1, return_details=True)
-t3_eds1_arr = t3_eds1.squeeze().cpu().detach().numpy()
-sigma_eds1_arr = sigma_eds1.squeeze().cpu().detach().numpy()
-enc_centers_eds1_arr = enc_centers_eds1.squeeze().cpu().detach().numpy()
-
-print("t3_eds1_arr: ", t3_eds1_arr.shape)
-print("sigma_eds1_arr: ", sigma_eds1_arr.shape)
-print("enc_centers_eds1_arr: ", enc_centers_eds1_arr.shape)
-
-np.save("./toy_tensors/features.npy", t3_eds1_arr)
-np.save("./toy_tensors/sigma.npy", sigma_eds1_arr)
-np.save("./toy_tensors/centers.npy", enc_centers_eds1_arr)
-
+for name, param in model.named_parameters():
+    # print(name,param.size())
+    if not "gbc" in name: print(name)
+# # Get images
+# transform = torchvision.transforms.Compose([
+#             torchvision.transforms.ToTensor(),
+#             torchvision.transforms.Normalize([0.5], [0.5]),
+#         ])
+# clahe = cv2.createCLAHE(
+#     clipLimit=1.5, tileGridSize=(8, 8)
+# )
+# def get_img(img_path: str) -> torch.Tensor:
+#     img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+#     img_resized = cv2.resize(img, (192,192),cv2.INTER_AREA)
+#     table = float(255) * (np.linspace(0, 1, 256) ** 0.8)
+#     img_gamma = cv2.LUT(img_resized.astype(np.uint8), table.astype(np.uint8))
+#     img_clahe = clahe.apply(img_gamma)
+#     pil_img = PIL.Image.fromarray(img_clahe)
+#     return transform(pil_img).unsqueeze(0).to(device)
+#
+# openeds_1 = get_img("./dataset_images/openeds_1.png")
+# # openeds_2 = get_img("./dataset_images/openeds_2.png")
+# # pupil = get_img("./dataset_images/pupil.png")
+# # swirski = get_img("./dataset_images/swirski.png")
+#
+# # sigma => torch.Size([1, 1, 16, 64]) : B, N, num_balls, features space dim
+# # ball centers => torch.Size([16, 64]): num_balls, coordinates
+#
+# # 필요한 정보: 1. Encoder features(GBC이전)=t3 2. GB 중심 3. GB radii
+# # (out, t3, t3_gbc, att_t3, dec_feature,sigma,enc_balls_centers)
+# _,t3_eds1,_,_,_,sigma_eds1,enc_centers_eds1 = model(openeds_1, return_details=True)
+# t3_eds1_arr = t3_eds1.squeeze().cpu().detach().numpy()
+# sigma_eds1_arr = sigma_eds1.squeeze().cpu().detach().numpy()
+# enc_centers_eds1_arr = enc_centers_eds1.squeeze().cpu().detach().numpy()
+#
+# print("t3_eds1_arr: ", t3_eds1_arr.shape)
+# print("sigma_eds1_arr: ", sigma_eds1_arr.shape)
+# print("enc_centers_eds1_arr: ", enc_centers_eds1_arr.shape)
+#
+# np.save("./toy_tensors/features.npy", t3_eds1_arr)
+# np.save("./toy_tensors/sigma.npy", sigma_eds1_arr)
+# np.save("./toy_tensors/centers.npy", enc_centers_eds1_arr)
+#
 
 

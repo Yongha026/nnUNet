@@ -31,5 +31,6 @@ echo "WandB Project:      $nnUNet_wandb_project (Enabled: $nnUNet_wandb_enabled)
 echo "Target GPU:         Device $CUDA_VISIBLE_DEVICES"
 echo "=============================================== commands ================================================"
 echo "nohup nnUNetv2_train 400 2d 0 -tr nnUNetTrainerGBC_S_16 > GBC_S_400_16.log 2>&1 &"
-echo "nnUNetv2_predict -i ./nnUNet_test_imgs/ -o ./nnUNet_infer_res/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
+echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerGBC_FT --pretrained_weights PATH_TO_CKPT > GBC_##_FT.log 2>&1 &"
 echo "nnUNetv2_predict -i /mnt/hdd1/nnunetv2_swir/images/ -o /mnt/hdd1/nnunetv2_swir/labels/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
+
