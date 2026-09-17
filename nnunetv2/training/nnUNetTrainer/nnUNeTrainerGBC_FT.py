@@ -21,10 +21,68 @@ try:
 except ImportError:
     from archs_unext import UNext
 
-# try:
-#     from nnunetv2.training.nnUNetTrainer.archs_LBUNet import LBUNet
-# except ImportError:
-#     from archs_unext import LBUNet
+import sys
+import nnunetv2.run.load_pretrained_weights as lpw
+
+def load_pretrained_weights_backbone_only(network, fname, verbose=False):
+    """
+    Transfers backbone weights between matching keys in state_dicts.
+    Pretrained GBC parameters ('gbc.') and segmentation heads ('.seg_layers.')
+    are strictly excluded and discarded, avoiding any key or shape mismatch
+    and allowing fresh hyperspheric GBC parameter initialization.
+    """
+    from torch._dynamo import OptimizedModule
+    from torch.nn.parallel import DistributedDataParallel as DDP
+    import torch.distributed as dist
+
+    if dist.is_initialized():
+        saved_model = torch.load(fname, map_location=torch.device('cuda', dist.get_rank()), weights_only=False)
+    else:
+        saved_model = torch.load(fname, weights_only=False)
+    pretrained_dict = saved_model['network_weights']
+
+    skip_strings_in_pretrained = [
+        '.seg_layers.',
+        'gbc.',
+    ]
+
+    if isinstance(network, DDP):
+        mod = network.module
+    else:
+        mod = network
+    if isinstance(mod, OptimizedModule):
+        mod = mod._orig_mod
+
+    model_dict = mod.state_dict()
+    # verify that all backbone layers have matching keys and shapes
+    for key, _ in model_dict.items():
+        if all([i not in key for i in skip_strings_in_pretrained]):
+            assert key in pretrained_dict, \
+                f"Key {key} is missing in the pretrained model weights. The pretrained weights do not seem to be compatible with your network."
+            assert model_dict[key].shape == pretrained_dict[key].shape, \
+                f"The shape of the parameters of key {key} is not the same. Pretrained model: {pretrained_dict[key].shape}; your network: {model_dict[key].shape}."
+
+    pretrained_dict = {
+        k: v for k, v in pretrained_dict.items()
+        if k in model_dict.keys() and all([i not in k for i in skip_strings_in_pretrained])
+    }
+
+    model_dict.update(pretrained_dict)
+
+    print("################### Loading pretrained BACKBONE weights from file ", fname, '###################')
+    print(f"[*] Successfully transferred {len(pretrained_dict)} backbone layers. GBC parameters discarded & initialized fresh.")
+    if verbose:
+        print("Below is the list of overlapping backbone blocks in pretrained model:")
+        for key, value in pretrained_dict.items():
+            print(f"  {key}: {tuple(value.shape)}")
+    print("################### Done ###################")
+    mod.load_state_dict(model_dict)
+
+
+# Dynamically patch load_pretrained_weights across imported modules
+lpw.load_pretrained_weights = load_pretrained_weights_backbone_only
+if 'nnunetv2.run.run_training' in sys.modules:
+    sys.modules['nnunetv2.run.run_training'].load_pretrained_weights = load_pretrained_weights_backbone_only
 
 class nnUNetTrainerGBC(nnUNetTrainer):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
