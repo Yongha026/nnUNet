@@ -120,7 +120,8 @@ ENV/
 CLAUDE.md
 AGENTS.md
 
-./nnUNet_eds400_pre.sh
+nnUNet_ft_pre.sh
+run_trains.sh
 npy_to_onnx.py
 onnx_to_engine.py
 pth_to_onnx.py
