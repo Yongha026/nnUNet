@@ -52,6 +52,7 @@ coverage.xml
 
 # Django stuff:
 *.log
+!err_log/*.log
 local_settings.py
 
 # Flask stuff:
@@ -98,6 +99,7 @@ ENV/
 *.jpeg
 .idea
 *.txt
+!gbc_model_parameters.txt
 .idea/*
 .out
 # *.nii.gz  # nifti files needed for example_data for github actions tests
