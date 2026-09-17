@@ -82,13 +82,7 @@ print(sigma_swir[0])
 
 # 알고싶은거: Deep feature의 군집 정보가 유의미하게 Segmentation metric을 올려주는가?
 
-# 계획1: GB16개로 EDS, Swir 50epo씩만 훈련 -  Pupil & 그외만.
-# EDS, Aniso
-# EDS, Iso
-# Swir, Aniso
-# Swir, Iso
-
-# 계획2. GB16, Iso로 AD-GBC재훈련 - GB 중심 그냥 줘버리고 Finetuning만 할까
+# 진행중: GB4, Iso로 AD-GBC재훈련 - GB 중심 그냥 줘버리고 Finetuning만 할까
 # vs 해당 중심으로 K-means 돌려서 결과 비슷한지.
 # 1. AD-GBC_S 동일 인코더, 디코더. GB 파라미터만 Isotropic으로 바꾸고 파인튜닝.
 # torch kmeans로 GBC 빼고 중심점만 주고 broadcast해서 정보 더해서 결과내기.

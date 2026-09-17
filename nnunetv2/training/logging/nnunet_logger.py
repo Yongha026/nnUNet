@@ -8,6 +8,7 @@ from typing import Any
 from pathlib import Path
 import shutil
 import os
+import datetime
 
 try:
     import wandb
@@ -257,6 +258,9 @@ class WandbLogger:
         self.resume = resume
         self.project = os.getenv("nnUNet_wandb_project", "nnunet")
         self.mode = os.getenv("nnUNet_wandb_mode", "online")
+        now = datetime.datetime.now()
+        default_name = "run_"+now.strftime("%Y-%m-%d_%H-%M-%S")
+        self.name = os.getenv("nnUNet_wandb_name",default_name)
 
         wandb_id = None
         if (self.output_folder / "wandb").is_dir():
@@ -268,7 +272,7 @@ class WandbLogger:
                 shutil.rmtree(str(self.output_folder / "wandb"))
 
         _resume = "allow" if self.resume else "never"
-        self.run = wandb.init(project=self.project, dir=str(self.output_folder), id=wandb_id, mode=self.mode, resume=_resume)
+        self.run = wandb.init(project=self.project, name=self.name, dir=str(self.output_folder), id=wandb_id, mode=self.mode, resume=_resume)
         self.run.config.update({"JobID": get_cluster_job_id()})
         self.wandb_init_step = self.run.step
 

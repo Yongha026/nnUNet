@@ -30,6 +30,6 @@ echo "nnUNet_extTrainer:  $nnUNet_extTrainer"
 echo "WandB Project:      $nnUNet_wandb_project (Enabled: $nnUNet_wandb_enabled)"
 echo "Target GPU:         Device $CUDA_VISIBLE_DEVICES"
 echo "=============================================== commands ================================================"
-echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerGBC_FT --pretrained_weights PATH_TO_CKPT > GBC_##_FT.log 2>&1 &"
+echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerDGBC_S_4 -pretrained_weights /mnt/hdd1/nnunetv2_openEDS/nnUNet_results/Dataset250_OpenEDS2019/nnUNetTrainerGBC_S_4__nnUNetPlans__2d/fold_0/checkpoint_best.pth > /dev/null 2>&1 &"
 echo "nnUNetv2_predict -i /mnt/hdd1/nnunetv2_swir/images/ -o /mnt/hdd1/nnunetv2_swir/labels/ -d 250 -c 2d -tr nnUNetTrainerMLU_Run -f 0"
 

@@ -92,9 +92,9 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         self.enable_deep_supervision = False
 
         # Custom hyperparameters for hybrid Transformer/MLP/GBC architectures
-        self.initial_lr = 1e-5
+        self.initial_lr = 5e-5
         self.weight_decay = 0.01
-        self.num_epochs = 10  # Finetune for 10 epochs maybe
+        self.num_epochs = 50  # Finetune for 50 epochs maybe
 
     def _get_actual_network(self) -> nn.Module:
         net = self.network
