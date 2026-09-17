@@ -7,7 +7,11 @@ except (ImportError, ValueError):
     from GBC_utils import *
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
-from torch_kmeans import SoftKMeans, CosineSimilarity
+try:
+    from torch_kmeans import SoftKMeans, CosineSimilarity
+except ImportError:
+    SoftKMeans = None
+    CosineSimilarity = None
 
 # __all__ = ['GBC_Rolling_Unet_S', 'GBC_Rolling_Unet_M', 'GBC_Rolling_Unet_L', 'Rolling_Unet_L']
 
@@ -37,14 +41,20 @@ class KMeansBlock(nn.Module):
         self.centers = nn.Parameter(torch.randn(num_clusters, self.proj_dim) * 0.01)
 
         # Soft K-Means clustering with CosineSimilarity
-        self.kmeans = SoftKMeans(
-            n_clusters=num_clusters,
-            max_iter=max_iter,
-            num_init=1,
-            distance=CosineSimilarity,
-            temp=temp,
-            verbose=False,
-        )
+        if SoftKMeans is not None:
+            try:
+                self.kmeans = SoftKMeans(
+                    n_clusters=num_clusters,
+                    max_iter=max_iter,
+                    num_init=1,
+                    distance=CosineSimilarity,
+                    temp=temp,
+                    verbose=False,
+                )
+            except Exception:
+                self.kmeans = None
+        else:
+            self.kmeans = None
 
         if self.proj_dim != in_ch:
             self.proj_in = nn.Conv2d(in_ch, self.proj_dim, 1, bias=True)
@@ -71,15 +81,29 @@ class KMeansBlock(nn.Module):
         # c : GB anchor center
 
         # Expand learnable anchor centers across the batch (GBC self.centers로 K-means init)
-        init_centers = self.centers.unsqueeze(0).expand(B, -1, -1).contiguous()  # (B, K, d)
+        # Normalize anchor centers and features onto unit hypersphere for true Cosine Similarity
+        centers = F.normalize(self.centers.unsqueeze(0).expand(B, -1, -1), p=2, dim=-1)  # (B, K, d)
+        z_norm = F.normalize(z_flat, p=2, dim=-1)  # (B, N, d)
 
-        # Execute differentiable Soft K-Means (알아서 중심 옮겨가며 cluster)
-        result = self.kmeans(z_flat, k=self.num_clusters, centers=init_centers)
+        # Execute differentiable Soft K-Means EM iterations (알아서 중심 옮겨가며 cluster)
+        for _ in range(max(1, self.max_iter - 1)):
+            with torch.no_grad():
+                # Cosine similarity matrix: S_{i, k} = cos(z_i, c_k) in [-1, 1]
+                sim = torch.bmm(z_norm, centers.transpose(1, 2))  # (B, N, K)
+                att = F.softmax(self.temp * sim, dim=-1)  # (B, N, K)
 
-        # Dynamic sample centroids: (B, K, d)
-        dynamic_centers = result.centers
-        # Soft assignment probabilities: (B, N, K) - 논문에서는 alpha_{i,k} (Ball k에 소속될 pixel z_i의 soft weight)
-        att = result.soft_assignment
+                # Aggregation: Update cluster centers (c'_k = \sum_i alpha_{i,k} z_i / \sum_i alpha_{i,k})
+                weight_sum = att.sum(dim=1, keepdim=True).transpose(1, 2) + 1e-6  # (B, K, 1)
+                new_centers = torch.bmm(att.transpose(1, 2), z_flat) / weight_sum  # (B, K, d)
+                centers = F.normalize(new_centers, p=2, dim=-1)
+
+        # Final iteration with full gradient tracking for backpropagation
+        sim = torch.bmm(z_norm, centers.transpose(1, 2))  # (B, N, K)
+        att = F.softmax(self.temp * sim, dim=-1)           # (B, N, K) - Soft assignment probabilities
+
+        # Dynamic sample centroids via final Aggregation
+        weight_sum = att.sum(dim=1, keepdim=True).transpose(1, 2) + 1e-6  # (B, K, 1)
+        dynamic_centers = torch.bmm(att.transpose(1, 2), z_flat) / weight_sum  # (B, K, d)
 
         # alpha center(att된 z들)가 논문에서는 Broadcast(Ball -> Set)
         # 근데 왜 Aggregation 부분 없냐고 십탱
@@ -118,9 +142,7 @@ class KMeansBlock(nn.Module):
         out = self.refine(out)
 
         # Clustering distortion (inertia) loss: (1.0 - cosine_similarity)
-        # result.inertia contains the cosine similarity matrix (B, N, K)
-        cos_sim = result.inertia
-        distortion = torch.sum(att * (1.0 - cos_sim), dim=-1).mean()
+        distortion = torch.sum(att * (1.0 - sim), dim=-1).mean()
 
         return out, att, dynamic_centers, distortion
 

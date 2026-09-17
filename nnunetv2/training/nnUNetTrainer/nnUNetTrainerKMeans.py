@@ -47,6 +47,15 @@ class nnUNetTrainerKMeans(nnUNetTrainer):
     def set_deep_supervision_enabled(self, enabled: bool):
         pass
 
+    def on_train_epoch_start(self):
+        self.network.train()
+        self.lr_scheduler.step()
+        self.print_to_log_file('')
+        self.print_to_log_file(f'Epoch {self.current_epoch}')
+        self.print_to_log_file(
+            f"Current learning rate: {np.round(self.optimizer.param_groups[0]['lr'], decimals=6)}")
+        self.logger.log('lrs', self.optimizer.param_groups[0]['lr'], self.current_epoch)
+
     def _get_actual_network(self) -> nn.Module:
         net = self.network
         if hasattr(net, 'module'):  # DDP wrapping
