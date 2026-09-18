@@ -22,7 +22,16 @@ def fit_ellipse_to_mask(binary_mask):
         return binary_mask.astype(bool)
 
     hull = cv2.convexHull(largest_contour)
-    ellipse = cv2.fitEllipse(hull)
+    # Check vertices again
+    target_pts = hull if len(hull) >= 5 else largest_contour
+
+    if len(target_pts) < 5:
+        return binary_mask.astype(bool)
+
+    try:
+        ellipse = cv2.fitEllipse(hull)
+    except cv2.error:
+        return binary_mask.astype(bool)
 
     fitted_mask = np.zeros_like(img)
     cv2.ellipse(fitted_mask, ellipse, color=255, thickness=-1)

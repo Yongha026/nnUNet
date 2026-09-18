@@ -1,0 +1,63 @@
+D-GBC_S_16 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8545
+mIOU:  0.7755
+HD95:  7.7340 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8758
+mIOU:  0.8060
+HD95:  3.8081 (Valid: 600/600)
+D-GBC_S_64 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.7208
+mIOU:  0.6234
+HD95:  7.9375 (Valid: 580/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.7488
+mIOU:  0.6634
+HD95:  6.3487 (Valid: 580/600)
+D-GBC_S_2 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8567
+mIOU:  0.7800
+HD95:  8.7365 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8705
+mIOU:  0.8075
+HD95:  4.3386 (Valid: 600/600)
+KMeans_S_16 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8521
+mIOU:  0.7723
+HD95:  8.1897 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8779
+mIOU:  0.8098
+HD95:  3.7765 (Valid: 600/600)
+KMeans_S_64 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8584
+mIOU:  0.7823
+HD95:  7.7232 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8661
+mIOU:  0.7974
+HD95:  5.3952 (Valid: 600/600)
+KMeans_S_2 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8536
+mIOU:  0.7779
+HD95:  8.0775 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8634
+mIOU:  0.7969
+HD95:  4.9925 (Valid: 600/600)
+KMeans_S_4 Result
+==================== Without Ellipse Fitting ====================
+DSC:   0.8742
+mIOU:  0.8042
+HD95:  4.9619 (Valid: 600/600)
+==================== With Ellipse Fitting ====================
+DSC:   0.8849
+mIOU:  0.8196
+HD95:  3.6194 (Valid: 600/600)
