@@ -354,3 +354,21 @@ class nnUNetTrainerDGBC_S_2(nnUNetTrainerGBC):
             gbc_num_balls=2,
             use_diag_cov=False,
         )
+class nnUNetTrainerDGBC_S_8(nnUNetTrainerGBC):
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return GBC_Rolling_Unet_S(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            img_size=img_size,
+            gbc_num_balls=8,
+            use_diag_cov=False,
+        )
