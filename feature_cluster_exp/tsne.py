@@ -44,7 +44,7 @@ from matplotlib.patches import Ellipse
 from matplotlib.colors import ListedColormap
 from torch.utils.data import Dataset, DataLoader
 import random
-
+import re
 from sklearn.manifold import TSNE
 
 # ─── path setup ──────────────────────────────────────────────────────────────
@@ -269,6 +269,10 @@ if __name__ == "__main__":
     device = torch.device(device_str)
 
     model_path_adgbc = args.MODEL_PATH
+    match = re.search(r"GBC_S_(2|4|8|16|32|64)(?=__|$)",str(model_path_adgbc))
+    if match:
+        result=match.group(1)
+        gbc_num_balls = int(result)
 
     # ── dataset validation ────────────────────────────────────────────────
     # IMG_PATH must contain exactly one of "OpenEDS2019" or "jw_"
@@ -304,7 +308,7 @@ if __name__ == "__main__":
 
     try:
         model = GBC_S_EncDec(
-            num_classes=4, input_channels=1, deep_supervision=False
+            num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls
         ).to(device)
         checkpoint = torch.load(
             model_path_adgbc, map_location=device, weights_only=False
@@ -347,7 +351,7 @@ if __name__ == "__main__":
     # For post-GBC weighted centroids
     post_weighted_sum = torch.zeros(K, model.gbc.proj_dim, device="cpu")
     att_sum = torch.zeros(K, device="cpu")
-
+    print("[INFO] Set gbc_num_balls: ",gbc_num_balls)
     # ── feature extraction ────────────────────────────────────────────────
     print("[INFO] Extracting features …")
     with torch.no_grad():
@@ -518,7 +522,7 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_GBC_anisotropic_balls_tsne_{suffix}.png",
+            f"{dataset_prefix}_GBC_anisotropic_{gbc_num_balls}_balls_tsne_{suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")

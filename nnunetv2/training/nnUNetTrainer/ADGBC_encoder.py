@@ -1,7 +1,10 @@
 # AD-GBC + Rolling-UNet
 import torch
 import torch.nn.functional as F
-from .GBC_utils import *
+try:
+    from .GBC_utils import *
+except (ImportError, ValueError):
+    from GBC_utils import *
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
 
