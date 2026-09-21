@@ -120,6 +120,12 @@ if __name__ == "__main__":
         "--perplexity", default=30, type=int, help="t-SNE perplexity"
     )
     parser.add_argument("--seed", default=42, type=int, help="Random seed")
+    parser.add_argument(
+        "--center",
+        action="store_true",
+        default=False,
+        help="Visualize GBC cluster centers on the t-SNE plot",
+    )
     args = parser.parse_args()
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -244,15 +250,25 @@ if __name__ == "__main__":
     X = np.vstack(selected_feats)    # [N_total, C]
     y = np.concatenate(selected_labels)
 
-    # ── t-SNE fitting (encoder features only) ──────────────────────────────
-    print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
+    # ── t-SNE fitting ─────────────────────────────────────────────────────
     tsne = TSNE(
         n_components=2,
         perplexity=args.perplexity,
         n_jobs=-1,
         random_state=args.seed,
     )
-    X_embedded = tsne.fit_transform(X)
+
+    if args.center:
+        centers = model.gbc.centers.detach().cpu().numpy()  # [K, C]
+        X_with_centers = np.vstack([X, centers])
+        print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
+        emb = tsne.fit_transform(X_with_centers)
+        X_embedded = emb[:len(X)]
+        centers_embedded = emb[len(X):]
+    else:
+        print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
+        X_embedded = tsne.fit_transform(X)
+        centers_embedded = None
 
     # ── class label remapping & colormap ─────────────────────────────────
     tab10_cmap = plt.cm.get_cmap("tab10")
@@ -278,13 +294,42 @@ if __name__ == "__main__":
         cmap=plot_cmap,
         alpha=0.4,
         s=5,
+        zorder=1,
     )
+
+    if args.center and centers_embedded is not None:
+        ball_cmap = plt.cm.get_cmap("tab20")
+        for k in range(gbc_num_balls):
+            color_k = ball_cmap(k % 20)
+            ck = centers_embedded[k]
+            plt.scatter(
+                ck[0],
+                ck[1],
+                marker="^",
+                s=80,
+                c=[color_k],
+                edgecolors="black",
+                linewidths=0.8,
+                zorder=5,
+            )
+            plt.annotate(
+                str(k),
+                xy=(ck[0], ck[1]),
+                fontsize=7,
+                fontweight="bold",
+                ha="center",
+                va="bottom",
+                color="black",
+                zorder=6,
+            )
+
     cbar = plt.colorbar(scatter, ticks=ticks)
     cbar.ax.set_yticklabels(tick_labels)
     cbar.set_label("Class ID")
 
+    center_title = " with GBC Centers" if args.center else ""
     plt.title(
-        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering (t-SNE)\n"
+        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering{center_title} (t-SNE)\n"
         f"Encoder Processed Features • {X.shape[0]} points • perplexity={args.perplexity}",
         fontsize=11,
     )
@@ -294,12 +339,13 @@ if __name__ == "__main__":
     results_dir = os.path.join(exp_dir, "tsne_results")
     os.makedirs(results_dir, exist_ok=True)
 
+    center_suffix = "_centers" if args.center else ""
     if args.output:
         save_path = args.output
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_tsne_{suffix}.png",
+            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_tsne_{suffix}{center_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
