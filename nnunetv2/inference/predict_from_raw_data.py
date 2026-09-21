@@ -966,7 +966,7 @@ def predict_entry_point():
                         help="Use this to set the device the inference should run with. Available options are 'cuda' "
                              "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
                              "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_predict [...] instead!")
-    parser.add_argument('--disable_progress_bar', action='store_true', required=False, default=False,
+    parser.add_argument('--disable_progress_bar', action='store_true', required=False, default=True,
                         help='Set this flag to disable progress bar. Recommended for HPC environments (non interactive '
                              'jobs)')
     parser.add_argument('--not_on_device', action='store_true', required=False, default=False,
