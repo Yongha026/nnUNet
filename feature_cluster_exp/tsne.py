@@ -1,24 +1,17 @@
 """
-tsne_GBC.py — Visualise GBC anisotropic balls with UNet deep encoder features
-via t-SNE.
+tsne.py — Visualise UNet deep encoder processed features via t-SNE.
 
-Produces a side-by-side plot:
-  Left  : Pre-GBC features (t3)  + Granular Ball ellipses / centers
-  Right : Post-GBC features (t3_gbc) + Granular Ball ellipses / centers
-
-Ball centers for Pre-GBC come directly from model.gbc.centers.
-Ball centers for Post-GBC are membership-weighted centroids of the
-post-GBC pixel features.
+Plots pixel-wise t-SNE clustering for encoder processed feature elements only
+(no GBC ball centers or ellipses).
 
 Usage
 -----
-python pupil_src/tests/tsne_GBC.py  /path/to/images  [options]
+python feature_cluster_exp/tsne.py  /path/to/images  /path/to/checkpoint.pth  [options]
 
 Options
 -------
 --datas             Number of images to sample (default: 1024)
 --samples_per_class Max points per class for t-SNE (default: 2000)
---percentile        Percentile boundary for ball ellipses (default: 80.0)
 --pupil_only        Binary: Pupil vs Else (default)
 --all_classes       Full 4-class: Background / Sclera / Iris / Pupil
 --output            Output path (default: auto-generated in tsne_results/)
@@ -27,24 +20,21 @@ Options
 """
 
 import torch
-import torch.nn.functional as F
-
 import os
 import cv2
 import sys
 import numpy as np
 import glob
 import argparse
+import random
+import re
 
 import torchvision
 import PIL.Image
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
 from matplotlib.colors import ListedColormap
 from torch.utils.data import Dataset, DataLoader
-import random
-import re
 from sklearn.manifold import TSNE
 
 # ─── path setup ──────────────────────────────────────────────────────────────
@@ -52,6 +42,7 @@ exp_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.abspath(os.path.join(exp_dir, ".."))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
+
 
 # ─── dataset ─────────────────────────────────────────────────────────────────
 class ImageDataset(Dataset):
@@ -72,8 +63,6 @@ class ImageDataset(Dataset):
     def __getitem__(self, idx):
         # Image
         img_path = self.image_paths[idx]
-        # if img_path.endswith("_0000.png"):
-        #     img_path = img_path.replace("_0000", "")
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         img_resized = cv2.resize(img, (192, 192), interpolation=cv2.INTER_AREA)
         img_gamma = cv2.LUT(
@@ -91,153 +80,21 @@ class ImageDataset(Dataset):
         return self.transform(pil_img), msk_resized
 
 
-# ─── ellipse drawing helpers ─────────────────────────────────────────────────
-def _percentile_ellipse(
-    points_2d: np.ndarray,
-    center_2d: np.ndarray,
-    percentile: float,
-    color,
-    alpha: float = 0.15,
-    linewidth: float = 1.5,
-):
-    """
-    Return a matplotlib Ellipse patch fitted to *points_2d* around
-    *center_2d*, scaled so that *percentile* % of points fall inside.
-
-    Returns None if there are < 5 points (degenerate covariance).
-    """
-    if len(points_2d) < 5:
-        return None
-
-    # 2D sample covariance of assigned points
-    diff = points_2d - center_2d
-    cov = np.cov(diff, rowvar=False)  # (2, 2)
-
-    # eigen-decomposition → orientation
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    # Sort descending
-    order = eigvals.argsort()[::-1]
-    eigvals = eigvals[order]
-    eigvecs = eigvecs[:, order]
-
-    # Mahalanobis distance of each point
-    cov_inv = np.linalg.inv(cov + np.eye(2) * 1e-8)
-    mahal = np.sqrt(np.einsum("ij,jk,ik->i", diff, cov_inv, diff))
-    radius = np.percentile(mahal, percentile)
-
-    # Ellipse axes = radius * sqrt(eigenvalue) in each direction
-    width = 2 * radius * np.sqrt(max(eigvals[0], 1e-8))
-    height = 2 * radius * np.sqrt(max(eigvals[1], 1e-8))
-
-    # Rotation angle (degrees)
-    angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
-
-    return Ellipse(
-        xy=center_2d,
-        width=width,
-        height=height,
-        angle=angle,
-        edgecolor=color,
-        facecolor=color,
-        alpha=alpha,
-        linewidth=linewidth,
-        linestyle="--",
-    )
-
-
-def _plot_panel(
-    ax,
-    X_embedded,       # (N, 2)  — pixel embeddings
-    centers_embedded,  # (K, 2)  — ball center embeddings
-    labels,            # (N,)    — class labels for each pixel
-    assignments,       # (N,)    — hard ball assignment per pixel
-    num_balls,
-    percentile,
-    cmap,
-    ticks,
-    tick_labels,
-    title,
-):
-    """Draw one panel (pre- or post-GBC) of the side-by-side figure."""
-    # Scatter pixel features coloured by class
-    scatter = ax.scatter(
-        X_embedded[:, 0],
-        X_embedded[:, 1],
-        c=labels,
-        cmap=cmap,
-        alpha=0.35,
-        s=3,
-        zorder=1,
-    )
-
-    # Distinct colours for the 32 ball ellipses / markers
-    ball_cmap = plt.cm.get_cmap("tab20", num_balls)
-
-    for k in range(num_balls):
-        mask_k = assignments == k
-        color_k = ball_cmap(k)
-        center_k = centers_embedded[k]
-
-        if mask_k.sum() >= 5:
-            pts_k = X_embedded[mask_k]
-            ell = _percentile_ellipse(
-                pts_k, center_k, percentile, color=color_k, alpha=0.15
-            )
-            if ell is not None:
-                ax.add_patch(ell)
-
-        # Ball center marker
-        ax.scatter(
-            center_k[0],
-            center_k[1],
-            marker="^",
-            s=60,
-            c=[color_k],
-            edgecolors="black",
-            linewidths=0.6,
-            zorder=5,
-        )
-        ax.annotate(
-            str(k),
-            xy=(center_k[0], center_k[1]),
-            fontsize=5,
-            fontweight="bold",
-            ha="center",
-            va="bottom",
-            color="black",
-            zorder=6,
-        )
-
-    cbar = plt.colorbar(scatter, ax=ax, ticks=ticks, shrink=0.8)
-    cbar.ax.set_yticklabels(tick_labels)
-    cbar.set_label("Class ID")
-    ax.set_title(title, fontsize=11)
-    ax.set_xticks([])
-    ax.set_yticks([])
-
-
 # ─── main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Visualise GBC anisotropic balls with UNet deep encoder "
-        "features using t-SNE (side-by-side Pre-GBC vs Post-GBC)"
+        description="Visualise UNet deep encoder processed features using t-SNE"
     )
     parser.add_argument("IMG_PATH", type=str, help="Path to image folder")
+    parser.add_argument("MODEL_PATH", type=str, help="Path to adgbc checkpoint")
     parser.add_argument(
         "--datas", default=1024, type=int, help="Number of images to sample"
     )
-    parser.add_argument("MODEL_PATH", type=str, help="Path to adgbc checkpoint")
     parser.add_argument(
         "--samples_per_class",
         default=2000,
         type=int,
         help="Max points per class for t-SNE",
-    )
-    parser.add_argument(
-        "--percentile",
-        default=80.0,
-        type=float,
-        help="Percentile boundary for ball ellipses",
     )
     # Class toggle — default is --pupil_only
     class_group = parser.add_mutually_exclusive_group()
@@ -269,10 +126,6 @@ if __name__ == "__main__":
     device = torch.device(device_str)
 
     model_path_adgbc = args.MODEL_PATH
-    match = re.search(r"GBC_S_(2|4|8|16|32|64)(?=__|$)",str(model_path_adgbc))
-    if match:
-        result=match.group(1)
-        gbc_num_balls = int(result)
 
     # ── dataset validation ────────────────────────────────────────────────
     # IMG_PATH must contain exactly one of "OpenEDS2019" or "jw_"
@@ -298,6 +151,10 @@ if __name__ == "__main__":
     # If --all_classes is set, override pupil_only
     if args.all_classes:
         args.pupil_only = False
+
+    # Extract gbc_num_balls from model filename if present (e.g. GBC_S_16__)
+    match = re.search(r"GBC_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
+    gbc_num_balls = int(match.group(1)) if match else 32
 
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -342,124 +199,62 @@ if __name__ == "__main__":
 
     NUM_CLASSES = 4
     SAMPLES_PER_CLASS = args.samples_per_class
-    K = model.gbc.num_balls  # 32
 
-    # Accumulators — one per class, for pre- and post-GBC features
-    pre_feats_by_class = {c: [] for c in range(NUM_CLASSES)}
-    post_feats_by_class = {c: [] for c in range(NUM_CLASSES)}
+    feats_by_class = {c: [] for c in range(NUM_CLASSES)}
 
-    # For post-GBC weighted centroids
-    post_weighted_sum = torch.zeros(K, model.gbc.proj_dim, device="cpu")
-    att_sum = torch.zeros(K, device="cpu")
-    print("[INFO] Set gbc_num_balls: ",gbc_num_balls)
     # ── feature extraction ────────────────────────────────────────────────
-    print("[INFO] Extracting features …")
+    print("[INFO] Extracting encoder processed features …")
     with torch.no_grad():
         for batch_imgs, batch_masks in tqdm(dataloader, desc="Extracting"):
             batch_imgs = batch_imgs.to(device)
 
-            _, t3, t3_gbc, att_t3, _ = model(batch_imgs, return_details=True)
-            # t3, t3_gbc: [B, C, H, W]   att_t3: [B, H*W, K]
+            # Extract encoder processed feature (enc_feature)
+            _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48]
 
-            B, C, H, W = t3.shape
+            B, C, H, W = enc.shape
 
             # Flatten to [B*H*W, C]
-            pre_pixels = t3.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
-            post_pixels = t3_gbc.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
+            enc_pixels = enc.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
             labels_pixels = batch_masks.reshape(-1).numpy()
-            att_flat = att_t3.reshape(-1, K).cpu()  # [B*H*W, K]
-
-            # Accumulate for post-GBC weighted centroid
-            post_flat_t = t3_gbc.permute(0, 2, 3, 1).reshape(-1, C).cpu()  # [N, C]
-            att_sum += att_flat.sum(dim=0)  # [K]
-            post_weighted_sum += torch.einsum(
-                "nk,nd->kd", att_flat, post_flat_t
-            )  # [K, C]
 
             # Per-class accumulation with cap
             for c in range(NUM_CLASSES):
-                current_len_pre = sum(len(x) for x in pre_feats_by_class[c])
-                if current_len_pre < SAMPLES_PER_CLASS:
+                current_len = sum(len(x) for x in feats_by_class[c])
+                if current_len < SAMPLES_PER_CLASS:
                     c_mask = labels_pixels == c
-                    c_pre = pre_pixels[c_mask]
-                    c_post = post_pixels[c_mask]
-                    if len(c_pre) > 0:
-                        pre_feats_by_class[c].append(c_pre)
-                        post_feats_by_class[c].append(c_post)
+                    c_feats = enc_pixels[c_mask]
+                    if len(c_feats) > 0:
+                        feats_by_class[c].append(c_feats)
 
     # ── balance & merge ───────────────────────────────────────────────────
-    selected_pre, selected_post, selected_labels = [], [], []
+    selected_feats, selected_labels = [], []
 
     for c in range(NUM_CLASSES):
-        c_pre_all = np.vstack(pre_feats_by_class[c])
-        c_post_all = np.vstack(post_feats_by_class[c])
+        if len(feats_by_class[c]) == 0:
+            continue
+        c_all = np.vstack(feats_by_class[c])
 
-        if len(c_pre_all) > SAMPLES_PER_CLASS:
-            idx = np.random.choice(len(c_pre_all), SAMPLES_PER_CLASS, replace=False)
-            c_pre_all = c_pre_all[idx]
-            c_post_all = c_post_all[idx]
+        if len(c_all) > SAMPLES_PER_CLASS:
+            idx = np.random.choice(len(c_all), SAMPLES_PER_CLASS, replace=False)
+            c_all = c_all[idx]
 
-        selected_pre.append(c_pre_all)
-        selected_post.append(c_post_all)
-        selected_labels.append(np.full(len(c_pre_all), c))
+        selected_feats.append(c_all)
+        selected_labels.append(np.full(len(c_all), c))
 
-    X_pre = np.vstack(selected_pre)    # [N_total, C]
-    X_post = np.vstack(selected_post)  # [N_total, C]
+    X = np.vstack(selected_feats)    # [N_total, C]
     y = np.concatenate(selected_labels)
 
-    # ── ball centers ──────────────────────────────────────────────────────
-    centers_pre = model.gbc.centers.detach().cpu().numpy()  # [K, C]
-
-    # Post-GBC: membership-weighted centroids
-    att_sum_safe = att_sum.clamp(min=1e-6)
-    centers_post = (post_weighted_sum / att_sum_safe.unsqueeze(1)).numpy()  # [K, C]
-
-    # ── t-SNE fitting (independent for pre and post) ──────────────────────
-    print(f"[INFO] Running t-SNE (perplexity={args.perplexity}) …")
-    N = X_pre.shape[0]
-
-    # Pre-GBC: append centers, fit, split
-    X_pre_with_centers = np.vstack([X_pre, centers_pre])  # [N+K, C]
-    tsne_pre = TSNE(
+    # ── t-SNE fitting (encoder features only) ──────────────────────────────
+    print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
+    tsne = TSNE(
         n_components=2,
         perplexity=args.perplexity,
         n_jobs=-1,
         random_state=args.seed,
     )
-    emb_pre = tsne_pre.fit_transform(X_pre_with_centers)
-    X_pre_2d = emb_pre[:N]
-    centers_pre_2d = emb_pre[N:]
+    X_embedded = tsne.fit_transform(X)
 
-    # Post-GBC: append centers, fit, split
-    X_post_with_centers = np.vstack([X_post, centers_post])
-    tsne_post = TSNE(
-        n_components=2,
-        perplexity=args.perplexity,
-        n_jobs=-1,
-        random_state=args.seed,
-    )
-    emb_post = tsne_post.fit_transform(X_post_with_centers)
-    X_post_2d = emb_post[:N]
-    centers_post_2d = emb_post[N:]
-
-    # ── hard ball assignment for ellipses ─────────────────────────────────
-    # Re-compute assignments for balanced/selected pixels using pre-GBC
-    # distances (same logic as GranularBall.forward)
-    sigma_np = (
-        F.softplus(model.gbc.log_sigma).detach().cpu().numpy() + 1e-6
-    )  # [K, C]
-    dif = X_pre[:, None, :] - centers_pre[None, :, :]  # [N, K, C]
-    dif_scaled = dif / sigma_np[None, :, :]
-    dist2 = (dif_scaled**2).sum(axis=-1)  # [N, K]
-    assignments_pre = dist2.argmin(axis=1)  # [N]
-
-    # Post-GBC assignments via same distance in post space
-    dif_post = X_post[:, None, :] - centers_post[None, :, :]
-    dif_post_scaled = dif_post / sigma_np[None, :, :]
-    dist2_post = (dif_post_scaled**2).sum(axis=-1)
-    assignments_post = dist2_post.argmin(axis=1)
-
-    # ── class label remapping ─────────────────────────────────────────────
+    # ── class label remapping & colormap ─────────────────────────────────
     tab10_cmap = plt.cm.get_cmap("tab10")
     if args.pupil_only:
         y_plot = np.where(y == 3, 1, 0)
@@ -475,43 +270,25 @@ if __name__ == "__main__":
         suffix = "all_classes"
 
     # ── plot ──────────────────────────────────────────────────────────────
-    fig, (ax_pre, ax_post) = plt.subplots(1, 2, figsize=(22, 9))
-
-    _plot_panel(
-        ax=ax_pre,
-        X_embedded=X_pre_2d,
-        centers_embedded=centers_pre_2d,
-        labels=y_plot,
-        assignments=assignments_pre,
-        num_balls=K,
-        percentile=args.percentile,
+    plt.figure(figsize=(10, 8))
+    scatter = plt.scatter(
+        X_embedded[:, 0],
+        X_embedded[:, 1],
+        c=y_plot,
         cmap=plot_cmap,
-        ticks=ticks,
-        tick_labels=tick_labels,
-        title=f"Pre-GBC (t3) — {args.percentile:.0f}th-pctl Ellipses",
+        alpha=0.4,
+        s=5,
     )
+    cbar = plt.colorbar(scatter, ticks=ticks)
+    cbar.ax.set_yticklabels(tick_labels)
+    cbar.set_label("Class ID")
 
-    _plot_panel(
-        ax=ax_post,
-        X_embedded=X_post_2d,
-        centers_embedded=centers_post_2d,
-        labels=y_plot,
-        assignments=assignments_post,
-        num_balls=K,
-        percentile=args.percentile,
-        cmap=plot_cmap,
-        ticks=ticks,
-        tick_labels=tick_labels,
-        title=f"Post-GBC (t3_gbc) — {args.percentile:.0f}th-pctl Ellipses",
+    plt.title(
+        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering (t-SNE)\n"
+        f"Encoder Processed Features • {X.shape[0]} points • perplexity={args.perplexity}",
+        fontsize=11,
     )
-
-    fig.suptitle(
-        f"[{dataset_prefix}] GBC Anisotropic Ball Visualisation  •  K={K} balls  •  "
-        f"perplexity={args.perplexity}  •  {len(rand_images)} images",
-        fontsize=13,
-        fontweight="bold",
-    )
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout()
 
     # ── save ──────────────────────────────────────────────────────────────
     results_dir = os.path.join(exp_dir, "tsne_results")
@@ -522,7 +299,7 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_GBC_anisotropic_{gbc_num_balls}_balls_tsne_{suffix}.png",
+            f"{dataset_prefix}_Enc_pixel_features_tsne_{suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
