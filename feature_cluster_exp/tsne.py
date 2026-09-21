@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # Extract gbc_num_balls from model filename if present (e.g. GBC_S_16__)
     match = re.search(r"GBC_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
     gbc_num_balls = int(match.group(1)) if match else 32
-
+    print(f"[INFO] Checkpoint has {gbc_num_balls} clusters")
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_Enc_pixel_features_tsne_{suffix}.png",
+            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_tsne_{suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
