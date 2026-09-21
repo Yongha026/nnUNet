@@ -36,6 +36,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from torch.utils.data import Dataset, DataLoader
 from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 
 # ─── path setup ──────────────────────────────────────────────────────────────
 exp_dir = os.path.dirname(os.path.abspath(__file__))
@@ -125,6 +126,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Visualize GBC cluster centers on the t-SNE plot",
+    )
+    parser.add_argument(
+        "--pca",
+        action="store_true",
+        default=False,
+        help="Use PCA dimensionality reduction and visualize centers as stars (*)",
     )
     args = parser.parse_args()
 
@@ -250,25 +257,52 @@ if __name__ == "__main__":
     X = np.vstack(selected_feats)    # [N_total, C]
     y = np.concatenate(selected_labels)
 
-    # ── t-SNE fitting ─────────────────────────────────────────────────────
-    tsne = TSNE(
-        n_components=2,
-        perplexity=args.perplexity,
-        n_jobs=-1,
-        random_state=args.seed,
-    )
+    # ── Dimensionality reduction & center projection ─────────────────────────
+    show_centers = args.center or args.pca
+    centers = model.gbc.centers.detach().cpu().numpy() if show_centers else None
 
-    if args.center:
-        centers = model.gbc.centers.detach().cpu().numpy()  # [K, C]
-        X_with_centers = np.vstack([X, centers])
-        print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
-        emb = tsne.fit_transform(X_with_centers)
-        X_embedded = emb[:len(X)]
-        centers_embedded = emb[len(X):]
+    if args.pca:
+        pca = PCA(n_components=2, random_state=args.seed)
+        if show_centers:
+            all_points = np.vstack([X, centers])
+            print(f"[INFO] Running PCA on {X.shape[0]} feature elements + {gbc_num_balls} centers …")
+            emb = pca.fit_transform(all_points)
+            X_embedded = emb[:len(X)]
+            centers_embedded = emb[len(X):]
+        else:
+            print(f"[INFO] Running PCA on {X.shape[0]} feature elements …")
+            X_embedded = pca.fit_transform(X)
+            centers_embedded = None
+        method_name = "PCA"
+        marker_style = "*"
+        marker_size = 140
+        center_label = "PCA Centers (*)"
+        var_pct = pca.explained_variance_ratio_.sum() * 100
+        method_detail = f"PCA (Explained Var: {var_pct:.1f}%)"
+        reduction_tag = "pca"
     else:
-        print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
-        X_embedded = tsne.fit_transform(X)
-        centers_embedded = None
+        tsne = TSNE(
+            n_components=2,
+            perplexity=args.perplexity,
+            n_jobs=-1,
+            random_state=args.seed,
+        )
+        if show_centers:
+            all_points = np.vstack([X, centers])
+            print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
+            emb = tsne.fit_transform(all_points)
+            X_embedded = emb[:len(X)]
+            centers_embedded = emb[len(X):]
+        else:
+            print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
+            X_embedded = tsne.fit_transform(X)
+            centers_embedded = None
+        method_name = "t-SNE"
+        marker_style = "^"
+        marker_size = 80
+        center_label = "GBC Centers (^)"
+        method_detail = f"t-SNE (perplexity={args.perplexity})"
+        reduction_tag = "tsne"
 
     # ── class label remapping & colormap ─────────────────────────────────
     tab10_cmap = plt.cm.get_cmap("tab10")
@@ -297,7 +331,7 @@ if __name__ == "__main__":
         zorder=1,
     )
 
-    if args.center and centers_embedded is not None:
+    if show_centers and centers_embedded is not None:
         ball_cmap = plt.cm.get_cmap("tab20")
         for k in range(gbc_num_balls):
             color_k = ball_cmap(k % 20)
@@ -305,8 +339,8 @@ if __name__ == "__main__":
             plt.scatter(
                 ck[0],
                 ck[1],
-                marker="^",
-                s=80,
+                marker=marker_style,
+                s=marker_size,
                 c=[color_k],
                 edgecolors="black",
                 linewidths=0.8,
@@ -327,10 +361,10 @@ if __name__ == "__main__":
     cbar.ax.set_yticklabels(tick_labels)
     cbar.set_label("Class ID")
 
-    center_title = " with GBC Centers" if args.center else ""
+    center_title = f" with {center_label}" if show_centers else ""
     plt.title(
-        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering{center_title} (t-SNE)\n"
-        f"Encoder Processed Features • {X.shape[0]} points • perplexity={args.perplexity}",
+        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering{center_title}\n"
+        f"Encoder Processed Features • {X.shape[0]} points • {method_detail}",
         fontsize=11,
     )
     plt.tight_layout()
@@ -339,13 +373,13 @@ if __name__ == "__main__":
     results_dir = os.path.join(exp_dir, "tsne_results")
     os.makedirs(results_dir, exist_ok=True)
 
-    center_suffix = "_centers" if args.center else ""
+    center_suffix = "_centers" if show_centers else ""
     if args.output:
         save_path = args.output
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_tsne_{suffix}{center_suffix}.png",
+            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_{reduction_tag}_{suffix}{center_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
