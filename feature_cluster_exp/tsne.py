@@ -47,6 +47,12 @@ import random
 
 from sklearn.manifold import TSNE
 
+# ─── path setup ──────────────────────────────────────────────────────────────
+exp_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.abspath(os.path.join(exp_dir, ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 # ─── dataset ─────────────────────────────────────────────────────────────────
 class ImageDataset(Dataset):
     def __init__(self, image_paths):
@@ -264,31 +270,6 @@ if __name__ == "__main__":
 
     model_path_adgbc = args.MODEL_PATH
 
-    # ─── model loading ───────────────────────────────────────────────────────────
-    from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
-
-    try:
-        model = GBC_S_EncDec(
-            num_classes=4, input_channels=1, deep_supervision=False
-        ).to(device)
-        if os.path.exists(model_path_adgbc):
-            checkpoint = torch.load(
-                model_path_adgbc, map_location=device, weights_only=False
-            )
-            state_dict = (
-                checkpoint["network_weights"]
-                if (isinstance(checkpoint, dict) and "network_weights" in checkpoint)
-                else checkpoint
-            )
-            model.load_state_dict(state_dict)
-            model.eval()
-        else:
-            print(f"ADGBC ckpt file not found at {model_path_adgbc}")
-    except Exception as e:
-        print(f"Error loading adgbc: {e}")
-        raise e
-
-    model.eval().to(device)
     # ── dataset validation ────────────────────────────────────────────────
     # IMG_PATH must contain exactly one of "OpenEDS2019" or "jw_"
     EDS_match = "OpenEDS2019" in args.IMG_PATH
@@ -305,6 +286,9 @@ if __name__ == "__main__":
             "to identify the dataset."
         )
 
+    if not os.path.exists(model_path_adgbc):
+        parser.error(f"ADGBC checkpoint file not found at: {model_path_adgbc}")
+
     dataset_prefix = "OpenEDS2019" if EDS_match else "PupilLabs"
 
     # If --all_classes is set, override pupil_only
@@ -314,6 +298,29 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
+
+    # ─── model loading ───────────────────────────────────────────────────────────
+    from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
+
+    try:
+        model = GBC_S_EncDec(
+            num_classes=4, input_channels=1, deep_supervision=False
+        ).to(device)
+        checkpoint = torch.load(
+            model_path_adgbc, map_location=device, weights_only=False
+        )
+        state_dict = (
+            checkpoint["network_weights"]
+            if (isinstance(checkpoint, dict) and "network_weights" in checkpoint)
+            else checkpoint
+        )
+        model.load_state_dict(state_dict)
+        model.eval()
+    except Exception as e:
+        print(f"Error loading adgbc: {e}")
+        raise e
+
+    model.eval().to(device)
 
     # ── image sampling ────────────────────────────────────────────────────
     image_path = os.path.join(args.IMG_PATH, "*.png")
@@ -503,7 +510,7 @@ if __name__ == "__main__":
     plt.tight_layout(rect=[0, 0, 1, 0.95])
 
     # ── save ──────────────────────────────────────────────────────────────
-    results_dir = os.path.join(tests_dir, "tsne_results")
+    results_dir = os.path.join(exp_dir, "tsne_results")
     os.makedirs(results_dir, exist_ok=True)
 
     if args.output:
