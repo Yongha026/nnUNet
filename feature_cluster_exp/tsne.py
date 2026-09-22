@@ -76,6 +76,7 @@ class ImageDataset(Dataset):
         msk_path = (
             self.image_paths[idx].replace("images", "labels").replace("png", "npy")
         )
+
         msk = np.load(msk_path).astype(np.uint8)
         msk_resized = cv2.resize(msk, (48, 48), interpolation=cv2.INTER_NEAREST)
         return self.transform(pil_img), msk_resized
@@ -133,33 +134,52 @@ if __name__ == "__main__":
         default=False,
         help="Use PCA dimensionality reduction and visualize centers as stars (*)",
     )
+    parser.add_argument(
+        "--untrained", "-u",
+        action="store_true",
+        default=False,
+        help="Inference with Random initialized model(Linear: He, Conv: Xavier, else: normal)"
+    )
     args = parser.parse_args()
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
 
     model_path_adgbc = args.MODEL_PATH
+    ADGBC_match = "nnUNetTrainerGBC_" in args.MODEL_PATH
+    DGBC_match = "nnUNetTrainerDGBC_" in args.MODEL_PATH
+    KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
+
+    if ADGBC_match: model_prefix = "ADGBC"
+    elif DGBC_match: model_prefix = "DGBC"
+    else: model_prefix = "KMeans"
+
+    untrained_prefix = "UNTRAINED_" if args.untrained else ""
+    model_prefix = untrained_prefix + model_prefix
 
     # ── dataset validation ────────────────────────────────────────────────
     # IMG_PATH must contain exactly one of "OpenEDS2019" or "jw_"
-    EDS_match = "OpenEDS2019" in args.IMG_PATH
+    EDS_match = "Openedsdata2019" in args.IMG_PATH
     Pupil_match = "jw_" in args.IMG_PATH
+    Swir_match = "nnunetv2_swir" in args.IMG_PATH
 
-    if EDS_match and Pupil_match:
+    if EDS_match and Pupil_match and Swir_match:
         parser.error(
-            "IMG_PATH contains both 'OpenEDS2019' and 'jw_'. "
+            "IMG_PATH contains all three: 'OpenEDS2019', 'jw_', 'nnunetv2_swir. "
             "Please specify a path belonging to only one dataset."
         )
-    if not EDS_match and not Pupil_match:
+    if not EDS_match and not Pupil_match and not Swir_match:
         parser.error(
-            "IMG_PATH must contain either 'OpenEDS2019' or 'jw_' "
+            "IMG_PATH must contain either 'OpenEDS2019', 'jw_' or 'nnunetv2_swir' "
             "to identify the dataset."
         )
 
     if not os.path.exists(model_path_adgbc):
         parser.error(f"ADGBC checkpoint file not found at: {model_path_adgbc}")
 
-    dataset_prefix = "OpenEDS2019" if EDS_match else "PupilLabs"
+    if EDS_match: dataset_prefix = "OpenEDS2019"
+    elif Pupil_match: dataset_prefix = "PupilLabs"
+    else: dataset_prefix = "Swirski"
 
     # If --all_classes is set, override pupil_only
     if args.all_classes:
@@ -174,6 +194,24 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
 
     # ─── model loading ───────────────────────────────────────────────────────────
+    def initialize_weights(m):
+        # 선형(Linear) 계층인 경우
+        if isinstance(m, torch.nn.Linear):
+            torch.nn.init.kaiming_normal_(m.weight, nonlinearity='relu')  # He(Kaiming) 초기화
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0.0)  # 편향은 0으로 초기화
+
+        # 합성곱(Conv2d) 계층인 경우
+        elif isinstance(m, torch.nn.Conv2d):
+            torch.nn.init.xavier_normal_(m.weight)  # Xavier 초기화
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0.0)
+        # 나머지는 normal dist로 초기화
+        else:
+            torch.nn.init.normal_(m.weight, 0, 0.02)
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0.0)
+
     from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
 
     try:
@@ -193,6 +231,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error loading adgbc: {e}")
         raise e
+
+    if args.untrained:
+        print("[INFO] Initializing model ...")
+        model.apply(initialize_weights)
 
     model.eval().to(device)
 
@@ -379,7 +421,7 @@ if __name__ == "__main__":
     else:
         save_path = os.path.join(
             results_dir,
-            f"{dataset_prefix}_Enc_pixel_{gbc_num_balls}_balls_features_{reduction_tag}_{suffix}{center_suffix}.png",
+            f"{model_prefix}_{dataset_prefix}_Enc_{gbc_num_balls}_balls_{reduction_tag}_{suffix}{center_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
