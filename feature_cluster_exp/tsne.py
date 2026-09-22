@@ -201,15 +201,32 @@ if __name__ == "__main__":
             if m.bias is not None:
                 torch.nn.init.constant_(m.bias, 0.0)  # 편향은 0으로 초기화
 
-        # 합성곱(Conv2d) 계층인 경우
-        elif isinstance(m, torch.nn.Conv2d):
+        # 합성곱(Conv2d, ConvTranspose2d) 계층인 경우
+        elif isinstance(m, (torch.nn.Conv2d, torch.nn.ConvTranspose2d)):
             torch.nn.init.xavier_normal_(m.weight)  # Xavier 초기화
             if m.bias is not None:
                 torch.nn.init.constant_(m.bias, 0.0)
-        # 나머지는 normal dist로 초기화
-        else:
+
+        # 정규화(BatchNorm, LayerNorm, GroupNorm) 계층인 경우
+        elif isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm1d, torch.nn.LayerNorm, torch.nn.GroupNorm)):
+            if getattr(m, 'weight', None) is not None:
+                torch.nn.init.constant_(m.weight, 1.0)
+            if getattr(m, 'bias', None) is not None:
+                torch.nn.init.constant_(m.bias, 0.0)
+
+        # GranularBall 계층인 경우
+        elif type(m).__name__ == "GranularBall":
+            if hasattr(m, 'centers') and m.centers is not None:
+                torch.nn.init.normal_(m.centers, 0, 0.01)
+            if hasattr(m, 'log_sigma') and m.log_sigma is not None:
+                torch.nn.init.zeros_(m.log_sigma)
+            if hasattr(m, 'log_radius') and m.log_radius is not None:
+                torch.nn.init.zeros_(m.log_radius)
+
+        # 그 외 weight 텐서를 직접 가진 파라미터 계층만 normal dist로 초기화
+        elif hasattr(m, 'weight') and isinstance(getattr(m, 'weight', None), torch.Tensor) and m.weight is not None:
             torch.nn.init.normal_(m.weight, 0, 0.02)
-            if m.bias is not None:
+            if getattr(m, 'bias', None) is not None and isinstance(m.bias, torch.Tensor):
                 torch.nn.init.constant_(m.bias, 0.0)
 
     from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
