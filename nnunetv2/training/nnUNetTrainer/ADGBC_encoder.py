@@ -421,10 +421,10 @@ class GBC_S_EncDec(nn.Module):
 
         ### Conv Stage
         # out = torch.add(out, t3)
-        dec_feature = out
+        # dec_feature = out
         out, att_out, _, dif_out = self.gbc(out)
         out = torch.add(out, t3_gbc)  # 与经过GBC处理的t3进行跳跃连接
-        # dec_feature = out # GBC refinement add 후의 feature
+        dec_feature = out # GBC refinement add 후의 feature
 
         out = F.interpolate(self.decoder3(out), scale_factor=(2, 2), mode='bilinear')
         out = torch.add(out, t2)

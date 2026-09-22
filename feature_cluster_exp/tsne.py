@@ -140,6 +140,12 @@ if __name__ == "__main__":
         default=False,
         help="Inference with Random initialized model(Linear: He, Conv: Xavier, else: normal)"
     )
+    parser.add_argument(
+        "--dec",
+        action="store_true",
+        default=False,
+        help="Visualize Decoder features; After Cluster refinement addition"
+    )
     args = parser.parse_args()
 
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -150,8 +156,12 @@ if __name__ == "__main__":
     DGBC_match = "nnUNetTrainerDGBC_" in args.MODEL_PATH
     KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
 
-    if ADGBC_match: model_prefix = "ADGBC"
-    elif DGBC_match: model_prefix = "DGBC"
+    if ADGBC_match:
+        model_prefix = "ADGBC"
+        use_diag_cov = True
+    elif DGBC_match:
+        model_prefix = "DGBC"
+        use_diag_cov = False
     else: model_prefix = "KMeans"
 
     untrained_prefix = "UNTRAINED_" if args.untrained else ""
@@ -186,7 +196,7 @@ if __name__ == "__main__":
         args.pupil_only = False
 
     # Extract gbc_num_balls from model filename if present (e.g. GBC_S_16__)
-    match = re.search(r"GBC_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
+    match = re.search(r"_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
     gbc_num_balls = int(match.group(1)) if match else 32
     print(f"[INFO] Checkpoint has {gbc_num_balls} clusters")
     np.random.seed(args.seed)
@@ -230,11 +240,16 @@ if __name__ == "__main__":
                 torch.nn.init.constant_(m.bias, 0.0)
 
     from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
-
+    from nnunetv2.training.nnUNetTrainer.archs_K_means_UNet import Kmeans_encoder
     try:
-        model = GBC_S_EncDec(
-            num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls
-        ).to(device)
+        if not KMeans_match:
+            model = GBC_S_EncDec(
+                num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls, use_diag_cov=use_diag_cov
+            ).to(device)
+        else:
+            model = Kmeans_encoder(
+                num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls
+            )
         checkpoint = torch.load(
             model_path_adgbc, map_location=device, weights_only=False
         )
@@ -275,13 +290,19 @@ if __name__ == "__main__":
     feats_by_class = {c: [] for c in range(NUM_CLASSES)}
 
     # ── feature extraction ────────────────────────────────────────────────
-    print("[INFO] Extracting encoder processed features …")
+    if not args.dec:
+        print("[INFO] Extracting encoder processed features …")
+    else:print("[INFO] Extracting decoder refined features …")
+
     with torch.no_grad():
         for batch_imgs, batch_masks in tqdm(dataloader, desc="Extracting"):
             batch_imgs = batch_imgs.to(device)
 
             # Extract encoder processed feature (enc_feature)
-            _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48]
+            if args.dec:
+                _, _, enc = model(batch_imgs)  # [B, 64, 48, 48]
+            else:
+                _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48]
 
             B, C, H, W = enc.shape
 
@@ -421,9 +442,10 @@ if __name__ == "__main__":
     cbar.set_label("Class ID")
 
     center_title = f" with {center_label}" if show_centers else ""
+    Enc_or_Dec = "Decoder" if args.dec else "Encoder"
     plt.title(
-        f"[{dataset_prefix}] Pixel-wise Deep Feature Clustering{center_title}\n"
-        f"Encoder Processed Features • {X.shape[0]} points • {method_detail}",
+        f"[{dataset_prefix}] Pixel-wise {Enc_or_Dec} Feature Clustering{center_title}\n"
+        f"Processed Features • {X.shape[0]} points • {method_detail}",
         fontsize=11,
     )
     plt.tight_layout()
@@ -436,9 +458,10 @@ if __name__ == "__main__":
     if args.output:
         save_path = args.output
     else:
+        enc_or_dec = "Dec" if args.dec else "Enc"
         save_path = os.path.join(
             results_dir,
-            f"{model_prefix}_{dataset_prefix}_Enc_{gbc_num_balls}_balls_{reduction_tag}_{suffix}{center_suffix}.png",
+            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}_{gbc_num_balls}_balls_{reduction_tag}_{suffix}{center_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")

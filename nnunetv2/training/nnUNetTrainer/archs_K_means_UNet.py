@@ -17,7 +17,7 @@ except ImportError:
 
 # TODO: GBC clustering만 Soft K-Means로 바꾸기. GBC self.centers로 K-means init, 그 이후론 K-means가 알아서 중심 옮겨가며 cluster.
 # 이 때, Isotropic Granular ball과 K-means의 차이는?
-__all__ = ['KMeansBlock', 'KMeans_Rolling_Unet_S', 'GranularBall', 'GBC_Rolling_Unet_S']
+__all__ = ['KMeansBlock', 'KMeans_Rolling_Unet_S', 'GranularBall', 'GBC_Rolling_Unet_S','Kmeans_encoder']
 
 
 class KMeansBlock(nn.Module):
@@ -512,3 +512,145 @@ class KMeans_Rolling_Unet_S(nn.Module):
 
 # Backward-compatible alias
 GBC_Rolling_Unet_S = KMeans_Rolling_Unet_S
+
+class Kmeans_encoder(nn.Module):
+    def __init__(self, num_classes, input_channels=3, deep_supervision=False, img_size=224,
+                 embed_dims=[16, 32, 64, 128, 256],
+                 num_heads=[1, 2, 4, 8], qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                 drop_path_rate=0., norm_layer=nn.LayerNorm, depths=[1, 1, 1], sr_ratios=[8, 4, 2, 1],
+                 num_clusters=16, proj_dim=None, max_iter=5, temp=5.0,
+                 gbc_num_balls=None, gbc_proj_dim=None, **kwargs):
+        super().__init__()
+
+        # Handle backward-compatible arguments
+        if gbc_num_balls is not None:
+            num_clusters = gbc_num_balls
+        if gbc_proj_dim is not None:
+            proj_dim = gbc_proj_dim
+
+        self.embed_dims = embed_dims
+        self.conv1 = DoubleConv(input_channels, embed_dims[0])
+        self.pool1 = nn.MaxPool2d(2)
+        self.conv2 = DoubleConv(embed_dims[0], embed_dims[1])
+        self.pool2 = nn.MaxPool2d(2)
+        self.conv3 = DoubleConv(embed_dims[1], embed_dims[2])
+        self.pool3 = nn.MaxPool2d(2)
+
+        self.pool4 = nn.MaxPool2d(2)
+
+        self.FIBlock1 = Feature_Incentive_Block(img_size=img_size // 4, patch_size=3, stride=1,
+                                                in_chans=embed_dims[2],
+                                                embed_dim=embed_dims[3])
+        self.FIBlock2 = Feature_Incentive_Block(img_size=img_size // 8, patch_size=3, stride=1,
+                                                in_chans=embed_dims[3],
+                                                embed_dim=embed_dims[4])
+        self.FIBlock3 = Feature_Incentive_Block(img_size=img_size // 8, patch_size=3, stride=1,
+                                                in_chans=embed_dims[4],
+                                                embed_dim=embed_dims[3])
+
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
+        self.block1 = nn.ModuleList([Lo2Block(
+            dim=embed_dims[3], num_heads=num_heads[0], mlp_ratio=1, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[0], norm_layer=norm_layer,
+            sr_ratio=sr_ratios[0])])
+        self.block2 = nn.ModuleList([Lo2Block(
+            dim=embed_dims[4], num_heads=num_heads[0], mlp_ratio=1, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            drop=drop_rate + 0.1, attn_drop=attn_drop_rate, drop_path=dpr[1], norm_layer=norm_layer,
+            sr_ratio=sr_ratios[0])])
+        self.block3 = nn.ModuleList([Lo2Block(
+            dim=embed_dims[3], num_heads=num_heads[0], mlp_ratio=1, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[0], norm_layer=norm_layer,
+            sr_ratio=sr_ratios[0])])
+
+        self.norm1 = norm_layer(embed_dims[3])
+        self.norm2 = norm_layer(embed_dims[4])
+        self.norm3 = norm_layer(embed_dims[3])
+
+        self.FIBlock4 = nn.Conv2d(embed_dims[3], embed_dims[2], 3, stride=1, padding=1)
+        self.dbn4 = nn.BatchNorm2d(embed_dims[2])
+
+        self.decoder3 = D_DoubleConv(embed_dims[2], embed_dims[1])
+        self.decoder2 = D_DoubleConv(embed_dims[1], embed_dims[0])
+        self.decoder1 = D_DoubleConv(embed_dims[0], 8)
+
+        self.final = nn.Conv2d(8, num_classes, kernel_size=1)
+
+        proj_dim_actual = proj_dim if proj_dim and proj_dim > 0 else embed_dims[2]
+        self.kmeans_block = KMeansBlock(
+            in_ch=embed_dims[2],
+            num_clusters=num_clusters,
+            proj_dim=proj_dim_actual,
+            use_residual=True,
+            max_iter=max_iter,
+            temp=temp
+        )
+        self.gbc = self.kmeans_block  # Backward-compatible alias for trainer inspection
+
+    def forward(self, x):
+        B = x.shape[0]
+
+        ### Conv Stage
+        out = self.conv1(x)
+        t1 = out
+        out = self.pool1(out)
+        out = self.conv2(out)
+        t2 = out
+        out = self.pool2(out)
+        out = self.conv3(out)
+        t3 = out
+
+        t3_km, att_t3, _, dif_t3 = self.kmeans_block(t3)
+        out = self.pool3(t3_km)
+        enc_feature = t3_km
+
+        ### Stage 4
+        out, H, W = self.FIBlock1(out)
+        for i, blk in enumerate(self.block1):
+            out = blk(out, H, W)
+        out = self.norm1(out)
+        out = out.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        t4 = out
+
+        out = self.pool4(out)
+
+        ### Bottleneck
+        out, H, W = self.FIBlock2(out)
+        for i, blk in enumerate(self.block2):
+            out = blk(out, H, W)
+        out = self.norm2(out)
+        out = out.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        out, H, W = self.FIBlock3(out)
+        out = out.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        out = F.interpolate(out, scale_factor=(2, 2), mode='bilinear')
+
+        ### Stage 4
+        out = torch.add(out, t4)
+        out = out.flatten(2).transpose(1, 2)
+        for i, blk in enumerate(self.block3):
+            out = blk(out, H * 2, W * 2)
+        out = self.norm3(out)
+        out = out.reshape(B, H * 2, W * 2, -1).permute(0, 3, 1, 2).contiguous()
+        out = F.interpolate(F.relu(self.dbn4(self.FIBlock4(out))), scale_factor=(2, 2), mode='bilinear')
+
+        ### Conv Stage
+
+        out, att_out, _, dif_out = self.kmeans_block(out)
+        out = torch.add(out, t3_km)  # Skip connection with KMeans-clustered t3
+        dec_feature = out # Feature after k3 addition
+
+        out = F.interpolate(self.decoder3(out), scale_factor=(2, 2), mode='bilinear')
+        out = torch.add(out, t2)
+        out = F.interpolate(self.decoder2(out), scale_factor=(2, 2), mode='bilinear')
+        out = torch.add(out, t1)
+        out = self.decoder1(out)
+
+        out = self.final(out)
+
+        if self.training:
+            loss_intermediates = {
+                "att_1": att_t3, "dif_1": dif_t3, "inertia_1": dif_t3,
+                "att_2": att_out, "dif_2": dif_out, "inertia_2": dif_out
+            }
+            return out, loss_intermediates
+        else:
+            return out, enc_feature, dec_feature
