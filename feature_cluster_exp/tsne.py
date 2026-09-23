@@ -88,7 +88,7 @@ if __name__ == "__main__":
         description="Visualise UNet deep encoder processed features using t-SNE"
     )
     parser.add_argument("IMG_PATH", type=str, help="Path to image folder")
-    parser.add_argument("MODEL_PATH", type=str, help="Path to adgbc checkpoint")
+    parser.add_argument("MODEL_PATH", type=str, help="Path to model checkpoint (ADGBC, DGBC, KMeans, UNeXt)")
     parser.add_argument(
         "--datas", default=1024, type=int, help="Number of images to sample"
     )
@@ -157,6 +157,7 @@ if __name__ == "__main__":
     KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
     Next_match = any(x in args.MODEL_PATH for x in ["nnUNetTrainer_Next_", "Next", "next", "UNext", "unext"])
 
+    use_diag_cov = False
     if Next_match:
         model_prefix = "UNeXt"
     elif ADGBC_match:
@@ -191,7 +192,7 @@ if __name__ == "__main__":
         )
 
     if not os.path.exists(model_path_adgbc):
-        parser.error(f"ADGBC checkpoint file not found at: {model_path_adgbc}")
+        parser.error(f"Checkpoint file not found at: {model_path_adgbc}")
 
     if EDS_match: dataset_prefix = "OpenEDS2019"
     elif Pupil_match: dataset_prefix = "PupilLabs"
@@ -253,17 +254,18 @@ if __name__ == "__main__":
     from nnunetv2.training.nnUNetTrainer.archs_K_means_UNet import Kmeans_encoder
     from nnunetv2.training.nnUNetTrainer.archs_unext import UNext
     try:
-        if ADGBC_match or DGBC_match:
+        if Next_match:
+            model = UNext(num_classes=4, input_channels=1, deep_supervision=False, enc_dec=True).to(device)
+        elif ADGBC_match or DGBC_match:
             model = GBC_S_EncDec(
                 num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls, use_diag_cov=use_diag_cov
             ).to(device)
         elif KMeans_match:
             model = Kmeans_encoder(
                 num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls
-            )
-        elif Next_match:
-            model = UNext(num_classes=4, input_channels=1, deep_supervision=False, enc_dec=True)
-        else: raise Exception(f"Unknown model: {args.model}")
+            ).to(device)
+        else:
+            raise Exception(f"Unknown model architecture from: {args.MODEL_PATH}")
 
         checkpoint = torch.load(
             model_path_adgbc, map_location=device, weights_only=False
@@ -276,7 +278,7 @@ if __name__ == "__main__":
         model.load_state_dict(state_dict)
         model.eval()
     except Exception as e:
-        print(f"Error loading adgbc: {e}")
+        print(f"Error loading model: {e}")
         raise e
 
     if args.untrained:
@@ -322,7 +324,19 @@ if __name__ == "__main__":
 
             # Flatten to [B*H*W, C]
             enc_pixels = enc.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
-            labels_pixels = batch_masks.reshape(-1).numpy()
+
+            # Align mask spatial dimensions with feature map (e.g. UNeXt 12x12 or 6x6 vs 48x48)
+            if batch_masks.shape[1] != H or batch_masks.shape[2] != W:
+                masks_t = batch_masks.unsqueeze(1).float()
+                masks_resized = (
+                    torch.nn.functional.interpolate(masks_t, size=(H, W), mode="nearest")
+                    .squeeze(1)
+                    .byte()
+                    .numpy()
+                )
+            else:
+                masks_resized = batch_masks.numpy()
+            labels_pixels = masks_resized.reshape(-1)
 
             # Per-class accumulation with cap
             for c in range(NUM_CLASSES):
@@ -352,7 +366,13 @@ if __name__ == "__main__":
     y = np.concatenate(selected_labels)
 
     # ── Dimensionality reduction & center projection ─────────────────────────
-    show_centers = args.center or args.pca
+    has_gbc_centers = hasattr(model, 'gbc') and hasattr(model.gbc, 'centers')
+    if (args.center or args.pca) and not has_gbc_centers:
+        print(f"[WARNING] Model '{model_prefix}' does not have GBC cluster centers. Center visualization disabled.")
+        show_centers = False
+    else:
+        show_centers = (args.center or args.pca) and has_gbc_centers
+
     centers = model.gbc.centers.detach().cpu().numpy() if show_centers else None
 
     if args.pca:
@@ -458,7 +478,7 @@ if __name__ == "__main__":
     center_title = f" with {center_label}" if show_centers else ""
     Enc_or_Dec = "Decoder" if args.dec else "Encoder"
     plt.title(
-        f"[{dataset_prefix}] Pixel-wise {Enc_or_Dec} Feature Clustering{center_title}\n"
+        f"[{dataset_prefix}] {model_prefix} Pixel-wise {Enc_or_Dec} Feature Clustering{center_title}\n"
         f"Processed Features • {X.shape[0]} points • {method_detail}",
         fontsize=11,
     )
@@ -473,9 +493,10 @@ if __name__ == "__main__":
         save_path = args.output
     else:
         enc_or_dec = "Dec" if args.dec else "Enc"
+        balls_str = f"_{gbc_num_balls}_balls" if gbc_num_balls is not None else ""
         save_path = os.path.join(
             results_dir,
-            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}_{gbc_num_balls}_balls_{reduction_tag}_{suffix}{center_suffix}.png",
+            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}{balls_str}_{reduction_tag}_{suffix}{center_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
