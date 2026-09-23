@@ -378,8 +378,10 @@ class GBC_Rolling_Unet_S(nn.Module):
         self.final = nn.Conv2d(8, num_classes, kernel_size=1)
 
         proj_dim_actual = gbc_proj_dim if gbc_proj_dim and gbc_proj_dim > 0 else embed_dims[2]
+
+        use_residual = kwargs.get('use_residual', True)
         self.gbc = GranularBall(in_ch=embed_dims[2], num_balls=gbc_num_balls, proj_dim=proj_dim_actual,
-                                use_diag_cov=use_diag_cov, use_residual=True, tau=tau)
+                                use_diag_cov=use_diag_cov, use_residual=use_residual, tau=tau)
 
     def forward(self, x):
         B = x.shape[0]
