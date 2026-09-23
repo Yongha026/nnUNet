@@ -155,17 +155,20 @@ if __name__ == "__main__":
     ADGBC_match = "nnUNetTrainerGBC_" in args.MODEL_PATH
     DGBC_match = "nnUNetTrainerDGBC_" in args.MODEL_PATH
     KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
-    Next_match = "nnUNetTrainer_Next_" in args.MODEL_PATH
+    Next_match = any(x in args.MODEL_PATH for x in ["nnUNetTrainer_Next_", "Next", "next", "UNext", "unext"])
 
-    if ADGBC_match:
+    if Next_match:
+        model_prefix = "UNeXt"
+    elif ADGBC_match:
         model_prefix = "ADGBC"
         use_diag_cov = True
     elif DGBC_match:
         model_prefix = "DGBC"
         use_diag_cov = False
-    elif Next_match:
-        model_prefix = "NeXt"
-    else: model_prefix = "KMeans"
+    elif KMeans_match:
+        model_prefix = "KMeans"
+    else:
+        model_prefix = "Model"
 
     untrained_prefix = "UNTRAINED_" if args.untrained else ""
     model_prefix = untrained_prefix + model_prefix
@@ -199,9 +202,13 @@ if __name__ == "__main__":
         args.pupil_only = False
 
     # Extract gbc_num_balls from model filename if present (e.g. GBC_S_16__)
-    match = re.search(r"_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
-    gbc_num_balls = int(match.group(1)) if match else 32
-    print(f"[INFO] Checkpoint has {gbc_num_balls} clusters")
+    if not Next_match:
+        match = re.search(r"_S_(2|4|8|16|32|64)(?=__|$)", str(model_path_adgbc))
+        gbc_num_balls = int(match.group(1)) if match else 32
+        print(f"[INFO] Checkpoint has {gbc_num_balls} clusters")
+    else:
+        gbc_num_balls = None
+        print(f"[INFO] Model architecture: UNeXt (no cluster centers)")
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
