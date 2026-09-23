@@ -270,6 +270,8 @@ class UNext(nn.Module):
 
         self.soft = nn.Softmax(dim=1)
 
+        self.enc_dec = kwargs.get('enc_dec', False)
+
     def forward(self, x):
 
         B = x.shape[0]
@@ -303,7 +305,7 @@ class UNext(nn.Module):
             out = blk(out, H, W)
         out = self.norm4(out)
         out = out.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
-
+        dec = out
         ### Stage 4
 
         out = F.relu(F.interpolate(self.dbn1(self.decoder1(out)), scale_factor=(2, 2), mode='bilinear'))
@@ -335,7 +337,12 @@ class UNext(nn.Module):
         out = torch.add(out, t1)
         out = F.relu(F.interpolate(self.decoder5(out), scale_factor=(2, 2), mode='bilinear'))
 
-        return self.final(out)
+        if self.enc_dec:
+            # t4 [16,160,12,12]
+            # dec [16,256,6,6]
+            return out, t4, dec # t4 before Bottleneck, dec before Upsample
+        else:
+            return self.final(out)
 
 
 class UNext_S(nn.Module):

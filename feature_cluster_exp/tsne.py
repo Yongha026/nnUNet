@@ -155,6 +155,7 @@ if __name__ == "__main__":
     ADGBC_match = "nnUNetTrainerGBC_" in args.MODEL_PATH
     DGBC_match = "nnUNetTrainerDGBC_" in args.MODEL_PATH
     KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
+    Next_match = "nnUNetTrainer_Next_" in args.MODEL_PATH
 
     if ADGBC_match:
         model_prefix = "ADGBC"
@@ -162,6 +163,8 @@ if __name__ == "__main__":
     elif DGBC_match:
         model_prefix = "DGBC"
         use_diag_cov = False
+    elif Next_match:
+        model_prefix = "NeXt"
     else: model_prefix = "KMeans"
 
     untrained_prefix = "UNTRAINED_" if args.untrained else ""
@@ -241,15 +244,20 @@ if __name__ == "__main__":
 
     from nnunetv2.training.nnUNetTrainer.ADGBC_encoder import GBC_S_EncDec
     from nnunetv2.training.nnUNetTrainer.archs_K_means_UNet import Kmeans_encoder
+    from nnunetv2.training.nnUNetTrainer.archs_unext import UNext
     try:
-        if not KMeans_match:
+        if ADGBC_match or DGBC_match:
             model = GBC_S_EncDec(
                 num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls, use_diag_cov=use_diag_cov
             ).to(device)
-        else:
+        elif KMeans_match:
             model = Kmeans_encoder(
                 num_classes=4, input_channels=1, deep_supervision=False, gbc_num_balls=gbc_num_balls
             )
+        elif Next_match:
+            model = UNext(num_classes=4, input_channels=1, deep_supervision=False, enc_dec=True)
+        else: raise Exception(f"Unknown model: {args.model}")
+
         checkpoint = torch.load(
             model_path_adgbc, map_location=device, weights_only=False
         )
@@ -302,8 +310,7 @@ if __name__ == "__main__":
             if args.dec:
                 _, _, enc = model(batch_imgs)  # [B, 64, 48, 48]
             else:
-                _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48]
-
+                _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48])
             B, C, H, W = enc.shape
 
             # Flatten to [B*H*W, C]
