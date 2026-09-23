@@ -16,37 +16,54 @@ from nnunetv2.utilities.helpers import dummy_context
 import nnunetv2.run.load_pretrained_weights as lpw
 
 try:
-    from nnunetv2.training.nnUNetTrainer.archs_GBC import (
+    from .archs_GBC import (
         GBC_Rolling_Unet_S,
         GBC_Rolling_Unet_M,
         GBC_Rolling_Unet_L,
         Rolling_Unet_L,
     )
-except ImportError:
-    from archs_GBC import (
-        GBC_Rolling_Unet_S,
-        GBC_Rolling_Unet_M,
-        GBC_Rolling_Unet_L,
-        Rolling_Unet_L,
-    )
-
-try:
-    from nnunetv2.training.nnUNetTrainer.archs_unext import UNext
-except ImportError:
-    from archs_unext import UNext
-
-try:
-    from nnunetv2.training.nnUNetTrainer.archs_K_means_UNet import KMeans_Rolling_Unet_S
-except ImportError:
+except (ImportError, ValueError):
     try:
-        from archs_K_means_UNet import KMeans_Rolling_Unet_S
-    except ImportError:
-        KMeans_Rolling_Unet_S = None
+        from nnunetv2.training.nnUNetTrainer.archs_GBC import (
+            GBC_Rolling_Unet_S,
+            GBC_Rolling_Unet_M,
+            GBC_Rolling_Unet_L,
+            Rolling_Unet_L,
+        )
+    except (ImportError, ValueError):
+        from archs_GBC import (
+            GBC_Rolling_Unet_S,
+            GBC_Rolling_Unet_M,
+            GBC_Rolling_Unet_L,
+            Rolling_Unet_L,
+        )
 
 try:
-    from nnunetv2.training.nnUNetTrainer.GBC_utils import get_or_compute_sam_prototypes
-except ImportError:
-    from GBC_utils import get_or_compute_sam_prototypes
+    from .archs_unext import UNext
+except (ImportError, ValueError):
+    try:
+        from nnunetv2.training.nnUNetTrainer.archs_unext import UNext
+    except (ImportError, ValueError):
+        from archs_unext import UNext
+
+try:
+    from .archs_K_means_UNet import KMeans_Rolling_Unet_S
+except (ImportError, ValueError):
+    try:
+        from nnunetv2.training.nnUNetTrainer.archs_K_means_UNet import KMeans_Rolling_Unet_S
+    except (ImportError, ValueError):
+        try:
+            from archs_K_means_UNet import KMeans_Rolling_Unet_S
+        except (ImportError, ValueError):
+            KMeans_Rolling_Unet_S = None
+
+try:
+    from .GBC_utils import get_or_compute_sam_prototypes
+except (ImportError, ValueError):
+    try:
+        from nnunetv2.training.nnUNetTrainer.GBC_utils import get_or_compute_sam_prototypes
+    except (ImportError, ValueError):
+        from GBC_utils import get_or_compute_sam_prototypes
 
 
 def load_pretrained_weights_backbone_only(network, fname, verbose=False):
