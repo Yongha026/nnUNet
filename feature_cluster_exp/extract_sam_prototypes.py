@@ -81,6 +81,7 @@ def parse_args():
     parser.add_argument("--images_dir", type=str, default="./dataset_images", help="Path to OpenEDS images directory")
     parser.add_argument("--labels_dir", type=str, default=None, help="Path to OpenEDS labels directory (default: inferred from images)")
     parser.add_argument("--num_samples", type=int, default=32, help="Number of accumulated images for prototype extraction")
+    parser.add_argument("--batch_size", type=int, default=4, help="Mini-batch size for SAM forward pass to prevent CUDA OOM (default: 4)")
     parser.add_argument("--save_dir", type=str, default="./sam_centers", help="Directory to save features.npy, openeds_centers_{K}.npy, and openeds_sigma_{K}.npy")
     parser.add_argument("--cluster_k", type=str, default="2,4,8,16,32,64", help="Comma-separated cluster counts K to extract (default: 2,4,8,16,32,64)")
     parser.add_argument("--save_features", action="store_true", default=True, help="Save precomputed SAM features.npy and masks.npy (default: True)")
@@ -164,21 +165,34 @@ def main():
 
     print(f"Executing SAM Prototype Extraction on device: {device}")
 
-    # 1. Load data batch
+    # 1. Load data batch (kept on CPU until fed in mini-batches)
     images, masks = load_sample_batch(args.images_dir, args.labels_dir, args.num_samples)
-    images = images.to(device)
-    masks = masks.to(device)
 
     # 2. Instantiate pre-trained SAM image encoder
     print("Loading pretrained SAM ViT encoder (samvit_base_patch16.sa1b)...")
     sam_model = timm.create_model("samvit_base_patch16.sa1b", pretrained=True, num_classes=4)
     sam_model = sam_model.eval().to(device)
 
-    # 3. Extract SAM features
-    print("Forwarding accumulated batch through SAM encoder...")
+    # 3. Extract SAM features in mini-batches to prevent CUDA OOM
+    print(f"Forwarding {len(images)} images through SAM in mini-batches (batch_size={args.batch_size})...")
+    sam_features_list = []
     with torch.no_grad():
-        sam_features = sam_model.forward_features(images)  # [B, 256, 64, 64]
-        print(f"SAM output features shape: {tuple(sam_features.shape)}")
+        for i in range(0, len(images), args.batch_size):
+            batch_imgs = images[i:i + args.batch_size].to(device)
+            feats = sam_model.forward_features(batch_imgs)  # [b, 256, 64, 64]
+            sam_features_list.append(feats.cpu())
+            del batch_imgs, feats
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        sam_features = torch.cat(sam_features_list, dim=0).to(device)
+        masks = masks.to(device)
+        print(f"Aggregated SAM output features shape: {tuple(sam_features.shape)}")
+
+        # Clean up SAM model from GPU memory before PCA / clustering
+        del sam_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # 4. Shrink space: [B, 256, 64, 64] -> [B, 64, 48, 48]
         print("Shrinking SAM feature space: (256, 64, 64) -> (64, 48, 48) via PCA...")
