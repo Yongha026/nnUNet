@@ -33,28 +33,57 @@ import torch.nn.functional as F
 import torchvision
 from tqdm import tqdm
 
+# Robust multi-path resolution for GBC_utils
+script_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.dirname(script_dir)
+trainer_dir = os.path.join(repo_root, "nnunetv2", "training", "nnUNetTrainer")
+for p in [repo_root, trainer_dir, script_dir]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 try:
     from nnunetv2.training.nnUNetTrainer.GBC_utils import (
         shrink_sam_to_gbc_space,
         compute_class_prototypes_and_radii,
+        extract_sam_kmeans_clusters,
     )
 except ImportError:
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.append(repo_root)
-    from nnunetv2.training.nnUNetTrainer.GBC_utils import (
-        shrink_sam_to_gbc_space,
-        compute_class_prototypes_and_radii,
-    )
+    try:
+        from GBC_utils import (
+            shrink_sam_to_gbc_space,
+            compute_class_prototypes_and_radii,
+            extract_sam_kmeans_clusters,
+        )
+    except ImportError:
+        import importlib.util
+        gbc_utils_path = os.path.join(trainer_dir, "GBC_utils.py")
+        if not os.path.isfile(gbc_utils_path):
+            gbc_utils_path = os.path.join(script_dir, "GBC_utils.py")
+        if os.path.isfile(gbc_utils_path):
+            spec = importlib.util.spec_from_file_location("GBC_utils", gbc_utils_path)
+            gbc_utils = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gbc_utils)
+            shrink_sam_to_gbc_space = gbc_utils.shrink_sam_to_gbc_space
+            compute_class_prototypes_and_radii = gbc_utils.compute_class_prototypes_and_radii
+            extract_sam_kmeans_clusters = getattr(gbc_utils, "extract_sam_kmeans_clusters", None)
+        else:
+            raise ModuleNotFoundError(
+                f"Could not find 'GBC_utils.py' in {trainer_dir} or {script_dir}. "
+                f"Please ensure 'git pull' has been run to sync latest files."
+            )
 
 import timm
 
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Extract GBC prototype centers and radii from SAM features.")
+    parser = argparse.ArgumentParser(description="Extract GBC prototype centers, radii, and precompute SAM features.")
     parser.add_argument("--images_dir", type=str, default="./dataset_images", help="Path to OpenEDS images directory")
     parser.add_argument("--labels_dir", type=str, default=None, help="Path to OpenEDS labels directory (default: inferred from images)")
     parser.add_argument("--num_samples", type=int, default=32, help="Number of accumulated images for prototype extraction")
-    parser.add_argument("--save_dir", type=str, default="./sam_centers", help="Directory to save openeds_centers_{K}.npy and openeds_sigma_{K}.npy")
+    parser.add_argument("--save_dir", type=str, default="./sam_centers", help="Directory to save features.npy, openeds_centers_{K}.npy, and openeds_sigma_{K}.npy")
+    parser.add_argument("--cluster_k", type=str, default="2,4,8,16,32,64", help="Comma-separated cluster counts K to extract (default: 2,4,8,16,32,64)")
+    parser.add_argument("--save_features", action="store_true", default=True, help="Save precomputed SAM features.npy and masks.npy (default: True)")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "cpu"])
     return parser.parse_args()
 
@@ -156,38 +185,68 @@ def main():
         gbc_features, pca = shrink_sam_to_gbc_space(sam_features, target_hw=(48, 48), target_dim=64)
         print(f"GBC space features shape: {tuple(gbc_features.shape)}")
 
-        # 5. Extract 4-class prototypes and empirical radii
-        print("Computing 4-class prototypes and empirical dispersion radii...")
-        centers, log_sigma = compute_class_prototypes_and_radii(gbc_features, masks, num_classes=4)
+        # 5. Extract 4-class prototypes and empirical radii (if masks provided)
+        if masks is not None:
+            print("Computing 4-class prototypes and empirical dispersion radii from masks...")
+            centers_4, log_sigma_4 = compute_class_prototypes_and_radii(gbc_features, masks, num_classes=4)
+        else:
+            centers_4, log_sigma_4 = None, None
 
-    # Calculate actual positive sigma: softplus(log_sigma) + 1e-6
-    sigma = F.softplus(log_sigma) + 1e-6
-
-    centers_np = centers.cpu().numpy()
-    sigma_np = sigma.cpu().numpy()
-
-    # 6. Save results
     os.makedirs(args.save_dir, exist_ok=True)
-    centers_path = os.path.join(args.save_dir, "openeds_centers_4.npy")
-    sigma_path = os.path.join(args.save_dir, "openeds_sigma_4.npy")
 
-    np.save(centers_path, centers_np)
-    np.save(sigma_path, sigma_np)
-    # Also save generic centers.npy / sigma.npy for backward compatibility
-    np.save(os.path.join(args.save_dir, "centers.npy"), centers_np)
-    np.save(os.path.join(args.save_dir, "sigma.npy"), sigma_np)
+    # 6. Save precomputed SAM features
+    if args.save_features:
+        features_np = gbc_features.cpu().numpy()
+        features_path = os.path.join(args.save_dir, "features.npy")
+        np.save(features_path, features_np)
+        print(f"[*] Precomputed SAM Features shape: {features_np.shape} -> Saved to: {features_path}")
+
+        if masks is not None:
+            if masks.shape[-2:] != (48, 48):
+                masks_resampled = F.interpolate(masks.unsqueeze(1).float(), size=(48, 48), mode="nearest").squeeze(1).long()
+            else:
+                masks_resampled = masks.long()
+            masks_np = masks_resampled.cpu().numpy()
+            masks_path = os.path.join(args.save_dir, "masks.npy")
+            np.save(masks_path, masks_np)
+            print(f"[*] Aligned Masks shape:            {masks_np.shape} -> Saved to: {masks_path}")
+
+    # 7. Generate and save cluster prototypes for all requested K values
+    cluster_k_list = [int(k.strip()) for k in args.cluster_k.split(",") if k.strip()] if args.cluster_k else [4]
+    print(f"\n[*] Generating prototype clusters for K in {cluster_k_list}...")
+
+    for k in cluster_k_list:
+        if k == 4 and centers_4 is not None:
+            k_centers = centers_4
+            k_sigma = F.softplus(log_sigma_4) + 1e-6
+            print(f"  - K=4: Computed via ground-truth masked pooling (4 classes)")
+        elif extract_sam_kmeans_clusters is not None:
+            k_centers, k_log_sigma = extract_sam_kmeans_clusters(gbc_features, num_clusters=k)
+            k_sigma = F.softplus(k_log_sigma) + 1e-6
+            print(f"  - K={k}: Computed via feature token K-Means clustering")
+        else:
+            continue
+
+        k_centers_np = k_centers.cpu().numpy()
+        k_sigma_np = k_sigma.cpu().numpy()
+
+        k_centers_path = os.path.join(args.save_dir, f"openeds_centers_{k}.npy")
+        k_sigma_path = os.path.join(args.save_dir, f"openeds_sigma_{k}.npy")
+
+        np.save(k_centers_path, k_centers_np)
+        np.save(k_sigma_path, k_sigma_np)
+
+        if k == 4:
+            # Backward-compatible generic aliases
+            np.save(os.path.join(args.save_dir, "centers.npy"), k_centers_np)
+            np.save(os.path.join(args.save_dir, "sigma.npy"), k_sigma_np)
+
+        print(f"    Saved: {k_centers_path} {k_centers_np.shape} | {k_sigma_path} {k_sigma_np.shape}")
 
     print("\n" + "=" * 60)
-    print("         SAM PROTOTYPE EXTRACTION COMPLETE")
+    print("         SAM FEATURE & PROTOTYPE EXTRACTION COMPLETE")
     print("=" * 60)
-    print(f"Centers shape: {centers_np.shape} -> Saved to: {centers_path}")
-    print(f"Sigma shape:   {sigma_np.shape} -> Saved to: {sigma_path}")
-    print("\nClass Statistics:")
-    class_names = ["Background", "Pupil", "Iris", "Sclera"]
-    for k in range(4):
-        c_norm = np.linalg.norm(centers_np[k])
-        s_mean = sigma_np[k].mean()
-        print(f"  Class {k} ({class_names[k]:<10}): Center Norm = {c_norm:.3f}, Mean Radius (sigma) = {s_mean:.3f}")
+    print(f"Save Directory: {args.save_dir}")
     print("=" * 60)
 
 
