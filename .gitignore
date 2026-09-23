@@ -131,3 +131,4 @@ mask*
 test*
 !test_clahe.py
 sample*
+sam_centers/*
