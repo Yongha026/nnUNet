@@ -65,10 +65,11 @@ def compute_metrics(pred, gt):
     return dsc, iou, h_dist
 
 
-def print_metric_results(title, dices, ious, hd95s):
+def print_metric_results(model,title, dices, ious, hd95s):
     """
     수집된 평가 지표 리스트의 평균을 포맷팅하여 출력합니다.
     """
+    print(f"\n============================== {model} ==============================")
     print(f"\n==================== {title} ====================")
     print(f"DSC:   {np.nanmean(dices):.4f}")
     print(f"mIOU:  {np.nanmean(ious):.4f}")
@@ -153,10 +154,11 @@ for i in range(len(pruned_gt_masks)):
         ious.append(iou)
         hd95s.append(hd95_val)
 
+model = os.path.basename(os.path.normpath(args.test_dir))
 # 3. 최종 결과 출력
 if run_both:
-    print_metric_results("Without Ellipse Fitting", raw_dices, raw_ious, raw_hd95s)
-    print_metric_results("With Ellipse Fitting", fit_dices, fit_ious, fit_hd95s)
+    print_metric_results(model, "Without Ellipse Fitting", raw_dices, raw_ious, raw_hd95s)
+    print_metric_results(model, "With Ellipse Fitting", fit_dices, fit_ious, fit_hd95s)
 else:
     mode_name = "With Ellipse Fitting" if args.fit_ellipse else "Without Ellipse Fitting"
-    print_metric_results(mode_name, dices, ious, hd95s)
+    print_metric_results(model, mode_name, dices, ious, hd95s)
