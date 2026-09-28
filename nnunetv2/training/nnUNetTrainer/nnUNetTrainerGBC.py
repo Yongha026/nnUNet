@@ -139,7 +139,7 @@ class nnUNetTrainerGBC(nnUNetTrainer):
         self.enable_deep_supervision = False
         self.initial_lr = 1e-4
         self.weight_decay = 0.01
-        self.num_epochs = 300
+        self.num_epochs = 50
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
