@@ -12,9 +12,9 @@ from nnunetv2.utilities.plans_handling.plans_handler import PlansManager, Config
 from nnunetv2.utilities.helpers import dummy_context
 
 try:
-    from nnunetv2.training.nnUNetTrainer.archs_GBC import Rolling_Unet_L
+    from nnunetv2.training.nnUNetTrainer.archs_GBC import Rolling_Unet_L, Rolling_Unet_S
 except ImportError:
-    from archs_GBC import  Rolling_Unet_L
+    from archs_GBC import  Rolling_Unet_L, Rolling_Unet_S
 
 try:
     from nnunetv2.training.nnUNetTrainer.archs_unext import UNext
@@ -158,6 +158,23 @@ class nnUNetTrainerRoll_L_lossfix(nnUNetTrainerRUL):
             deep_supervision=False,
             img_size=img_size
         )
+
+    class nnUNetTrainerRoll_S(nnUNetTrainerRUL):
+        @staticmethod
+        def build_network_architecture(plans_manager: PlansManager,
+                                       configuration_manager: ConfigurationManager,
+                                       num_input_channels: int,
+                                       num_output_channels: int,
+                                       enable_deep_supervision: bool = True) -> nn.Module:
+            patch_size = configuration_manager.patch_size
+            img_size = patch_size[0]
+
+            return Rolling_Unet_S(
+                num_classes=num_output_channels,
+                input_channels=num_input_channels,
+                deep_supervision=False,
+                img_size=img_size
+            )
 
     def _build_loss(self):
         from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss
