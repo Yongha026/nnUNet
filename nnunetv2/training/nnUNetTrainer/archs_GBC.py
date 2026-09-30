@@ -8,7 +8,7 @@ except (ImportError, ValueError):
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
 
-__all__ = ['GBC_Rolling_Unet_S', 'GBC_Rolling_Unet_M', 'GBC_Rolling_Unet_L', 'Rolling_Unet_L']
+__all__ = ['GBC_Rolling_Unet_S', 'GBC_Rolling_Unet_M', 'GBC_Rolling_Unet_L', 'Rolling_Unet_L', 'Rolling_Unet_S']
 
 
 class GranularBall(nn.Module):
