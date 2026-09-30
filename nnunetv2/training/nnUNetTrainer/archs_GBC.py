@@ -869,9 +869,9 @@ class Rolling_Unet_S(nn.Module):
 
         self.decoder3 = D_DoubleConv(embed_dims[2], embed_dims[1])
         self.decoder2 = D_DoubleConv(embed_dims[1], embed_dims[0])
-        self.decoder1 = D_DoubleConv(embed_dims[0], 32)
+        self.decoder1 = D_DoubleConv(embed_dims[0], 8)
 
-        self.final = nn.Conv2d(32, num_classes, kernel_size=1)
+        self.final = nn.Conv2d(8, num_classes, kernel_size=1)
 
     def forward(self, x):
         B = x.shape[0]

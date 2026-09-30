@@ -46,7 +46,7 @@ class nnUNetTrainerRUL(nnUNetTrainer):
         # Custom hyperparameters for hybrid Transformer/MLP/GBC architectures
         self.initial_lr = 1e-4
         self.weight_decay = 0.01
-        self.num_epochs = 300  # GBC/Rolling-UNet commonly converges around 300-400 epochs
+        self.num_epochs = 50  # GBC/Rolling-UNet commonly converges around 300-400 epochs
 
     def configure_optimizers(self):
         # Use AdamW as recommended for hybrid Transformer/MLP architectures (SGD at 0.01 often diverges)
