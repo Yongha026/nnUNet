@@ -77,9 +77,17 @@ def maybe_load_checkpoint(nnunet_trainer: nnUNetTrainer, continue_training: bool
                                "continue from. Starting a new training...")
             expected_checkpoint_file = None
     elif validation_only:
-        expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_final.pth')
-        if not isfile(expected_checkpoint_file):
-            raise RuntimeError("Cannot run validation because the training is not finished yet!")
+        if pretrained_weights_file is not None:
+            if not nnunet_trainer.was_initialized:
+                nnunet_trainer.initialize()
+            load_pretrained_weights(nnunet_trainer.network, pretrained_weights_file, verbose=True)
+            expected_checkpoint_file = None
+        else:
+            expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_final.pth')
+            if not isfile(expected_checkpoint_file):
+                expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_best.pth')
+            if not isfile(expected_checkpoint_file):
+                raise RuntimeError("Cannot run validation because the training is not finished yet!")
     else:
         if pretrained_weights_file is not None:
             if not nnunet_trainer.was_initialized:
@@ -121,7 +129,7 @@ def run_ddp(rank, dataset_name_or_id, configuration, fold, tr, p, disable_checkp
     if not val:
         nnunet_trainer.run_training()
 
-    if val_with_best:
+    if val_with_best and (pretrained_weights is None or not val):
         nnunet_trainer.load_checkpoint(join(nnunet_trainer.output_folder, 'checkpoint_best.pth'))
     nnunet_trainer.perform_actual_validation(npz)
     cleanup_ddp()
@@ -199,7 +207,7 @@ def run_training(dataset_name_or_id: Union[str, int],
         if not only_run_validation:
             nnunet_trainer.run_training()
 
-        if val_with_best:
+        if val_with_best and (pretrained_weights is None or not only_run_validation):
             nnunet_trainer.load_checkpoint(join(nnunet_trainer.output_folder, 'checkpoint_best.pth'))
         nnunet_trainer.perform_actual_validation(export_validation_probabilities)
 
