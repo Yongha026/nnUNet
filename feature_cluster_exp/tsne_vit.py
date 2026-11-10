@@ -543,9 +543,10 @@ if __name__ == "__main__":
 
     center_suffix = f" • {centers_embedded.shape[0]} Centers (*)" if show_centers else ""
     plt.title(
-        f"[{dataset_prefix}] ViT Patch Feature Clustering\n"
-        f"{model_prefix} • {X.shape[0]} points • {method_detail}{center_suffix}",
-        fontsize=11,
+        # f"[{dataset_prefix}] ViT Patch Feature Clustering\n"
+        # f"{model_prefix} • {X.shape[0]} points • {method_detail}{center_suffix}",
+        args.model_name,
+        fontsize=20,
     )
     plt.tight_layout()
 
