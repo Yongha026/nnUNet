@@ -196,7 +196,7 @@ if __name__ == "__main__":
         "--model_name",
         default="vit_large_patch16_224",
         type=str,
-        help="Timm ViT model name (default: vit_large_patch16_224, e.g. vit_base_patch16_dinov3.lvd1689m)",
+        help="Timm ViT model name (default: vit_large_patch16_224: vit, e.g. vit_base_patch16_dinov3.lvd1689m: dino)",
     )
     parser.add_argument(
         "--img_size",
@@ -258,7 +258,11 @@ if __name__ == "__main__":
     if args.img_size is not None:
         create_kwargs["img_size"] = args.img_size
 
-    model = timm.create_model(args.model_name, **create_kwargs)
+    if args.model_name == "vit": model_name = "vit_large_patch16_224"
+    elif args.model_name == "dino": model_name = "vit_base_patch16_dinov3.lvd1689m"
+    else: model_name = "vit_large_patch16_224"
+
+    model = timm.create_model(model_name, **create_kwargs)
     model.eval().to(device)
 
     # ── Resolve input image size, patch grid size & prefix token count ───────
