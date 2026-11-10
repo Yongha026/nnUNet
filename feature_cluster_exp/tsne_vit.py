@@ -545,7 +545,7 @@ if __name__ == "__main__":
     plt.title(
         # f"[{dataset_prefix}] ViT Patch Feature Clustering\n"
         # f"{model_prefix} • {X.shape[0]} points • {method_detail}{center_suffix}",
-        args.model_name,
+        model_name,
         fontsize=20,
     )
     plt.tight_layout()
