@@ -117,7 +117,7 @@ else:
     dices, ious, hd95s = [], [], []
 
 # for i in tqdm(range(len(pruned_gt_masks))):
-for i in range(len(pruned_gt_masks)):
+for i in tqdm(range(len(pruned_gt_masks))):
     raw_pred = np.load(pruned_test_masks[i])
     raw_gt = np.load(pruned_gt_masks[i])
 
