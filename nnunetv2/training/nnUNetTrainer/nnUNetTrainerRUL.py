@@ -32,9 +32,9 @@ except ImportError:
     from archs_PMRNet import  PMRNet
 
 try:
-    from nnunetv2.training.nnUNetTrainer.archs_unetpp import NestedUNet
+    from nnunetv2.training.nnUNetTrainer.archs_unetpp import UNet, NestedUNet
 except ImportError:
-    from archs_unetpp import  NestedUNet
+    from archs_unetpp import UNet, NestedUNet
 
 class nnUNetTrainerRUL(nnUNetTrainer):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -290,6 +290,23 @@ class nnUNetTrainerUNnetPP(nnUNetTrainerRUL):
         img_size = patch_size[0]
 
         return NestedUNet(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            # img_size=img_size
+        )
+class nnUNetTrainerUNet_alt(nnUNetTrainerRUL):
+    """Alternative Version of UNet?"""
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return UNet(
             num_classes=num_output_channels,
             input_channels=num_input_channels,
             deep_supervision=False,

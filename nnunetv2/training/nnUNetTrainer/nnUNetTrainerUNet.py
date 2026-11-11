@@ -58,13 +58,15 @@ class nnUNetTrainerUNet(nnUNetTrainer):
         self.num_epochs = 300
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.network.parameters(),
-            lr=self.initial_lr,
-            weight_decay=self.weight_decay
-        )
-        from torch.optim.lr_scheduler import CosineAnnealingLR
-        lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.num_epochs, eta_min=1e-6)
+        # optimizer = torch.optim.AdamW(
+        #     self.network.parameters(),
+        #     lr=self.initial_lr,
+        #     weight_decay=self.weight_decay
+        # )
+        optimizer = torch.optim.SGD(self.network.parameters(), lr = self.initial_lr, momentum=0.99)
+        from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
+        # lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.num_epochs, eta_min=1e-6)
+        lr_scheduler = ConstantLR(optimizer, factor = 1.0, total_iters = self.num_epochs)
         return optimizer, lr_scheduler
 
     def set_deep_supervision_enabled(self, enabled: bool):
