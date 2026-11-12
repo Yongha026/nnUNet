@@ -22,6 +22,11 @@ except ImportError:
     from archs_unext import UNext
 
 try:
+    from nnunetv2.training.nnUNetTrainer.archs_nextGBC import NeXtGBC
+except ImportError:
+    from archs_nextGBC import NeXtGBC
+
+try:
     from nnunetv2.training.nnUNetTrainer.archs_UKAN import UKAN
 except ImportError:
     from archs_UKAN import UKAN
@@ -311,4 +316,20 @@ class nnUNetTrainerUNet_alt(nnUNetTrainerRUL):
             input_channels=num_input_channels,
             deep_supervision=False,
             # img_size=img_size
+        )
+class nnUNetTrainerNeXtGBC(nnUNetTrainerRUL):
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return UNext(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            img_size=img_size
         )

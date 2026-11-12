@@ -1,6 +1,9 @@
 #!/bin/bash
 # source nnUNet_preliminary.sh to run
 
+# 0. Get WandB name
+echo "WandB Run Name: "
+read name
 # 1. Standard nnU-Net Paths
 export nnUNet_raw="/mnt/hdd1/nnunetv2_openEDS/nnUNet_raw"
 export nnUNet_preprocessed="/mnt/hdd1/nnunetv2_openEDS/nnUNet_preprocessed"
@@ -13,6 +16,7 @@ export nnUNet_extTrainer="/home/iulab9/PycharmProjects/nnUNet/nnunetv2/training/
 export nnUNet_wandb_enabled=1
 export nnUNet_wandb_project="AD-GBC_OpenEDS"
 export WANDB_MODE=online
+export nnUNet_wandb_name="$name"
 
 # 4. Model Training Tweaks
 export nnUNet_compile=false # Disable compile to avoid Triton/Dynamo conflicts with custom GBC layers
@@ -28,6 +32,7 @@ echo "nnUNet_preprocessed:$nnUNet_preprocessed"
 echo "nnUNet_results:     $nnUNet_results"
 echo "nnUNet_extTrainer:  $nnUNet_extTrainer"
 echo "WandB Project:      $nnUNet_wandb_project (Enabled: $nnUNet_wandb_enabled)"
+echo "WandB Name: 	  $nnUNet_wandb_name"
 echo "Target GPU:         Device $CUDA_VISIBLE_DEVICES"
 echo "=============================================== commands ================================================"
 echo "nohup nnUNetv2_train 250 2d 0 -tr nnUNetTrainerDGBC_S_4 -pretrained_weights /mnt/hdd1/nnunetv2_openEDS/nnUNet_results/Dataset250_OpenEDS2019/nnUNetTrainerGBC_S_4__nnUNetPlans__2d/fold_0/checkpoint_best.pth > /dev/null 2>&1 &"
