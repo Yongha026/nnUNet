@@ -22,9 +22,9 @@ except ImportError:
     from archs_unext import UNext
 
 try:
-    from nnunetv2.training.nnUNetTrainer.archs_nextGBC import NeXtGBC
+    from nnunetv2.training.nnUNetTrainer.archs_nextGBC import NeXtGBC, NeXtGBC_S
 except ImportError:
-    from archs_nextGBC import NeXtGBC
+    from archs_nextGBC import NeXtGBC, NeXtGBC_S
 
 try:
     from nnunetv2.training.nnUNetTrainer.archs_UKAN import UKAN
@@ -75,44 +75,53 @@ class nnUNetTrainerRUL(nnUNetTrainer):
             net = net._orig_mod
         return net
 
-    # def compute_gbc_losses(self, loss_intermediates: dict, net_module: nn.Module) -> Tuple[torch.Tensor, torch.Tensor]:
-    #     model_gbc = net_module.gbc
-    #     centers = model_gbc.centers  # (K, d)
-    #     K = centers.shape[0]
-    #
-    #     # 1. Wasserstein-based Diversity Loss (prevent center collapse)
-    #     dist_matrix = torch.cdist(centers, centers, p=2)  # (K, K)
-    #     mask = ~torch.eye(K, dtype=torch.bool, device=centers.device)
-    #     l_div = torch.exp(-dist_matrix)[mask].mean()
-    #
-    #     # 2. Scale / Radius-Dispersion Consistency Loss
-    #     if hasattr(model_gbc, 'log_sigma') and model_gbc.log_sigma is not None:
-    #         sigma = torch.functional.F.softplus(model_gbc.log_sigma) + 1e-6  # (K, d)
-    #     else:
-    #         sigma = torch.functional.F.softplus(model_gbc.log_radius) + 1e-6  # (K, 1)
-    #     sigma_sq = sigma ** 2
-    #
-    #     losses_scale = []
-    #     for suffix in ["_1", "_2"]:
-    #         att_key = f"att{suffix}"
-    #         dif_key = f"dif{suffix}"
-    #         if att_key in loss_intermediates and dif_key in loss_intermediates:
-    #             att = loss_intermediates[att_key]  # (B, N, K)
-    #             dif = loss_intermediates[dif_key]  # (B, N, K, d)
-    #
-    #             # Weighted dispersion: sum_i (att_i * (x_i - c)^2) / sum_i att_i
-    #             dif_sq = dif ** 2  # (B, N, K, d)
-    #             num = (att.unsqueeze(-1) * dif_sq).sum(dim=1)  # (B, K, d)
-    #             den = att.sum(dim=1).unsqueeze(-1) + 1e-6  # (B, K, 1)
-    #             weighted_dispersion = num / den  # (B, K, d)
-    #
-    #             # Mean squared error between dispersion and scale
-    #             l_s = torch.mean((weighted_dispersion - sigma_sq.unsqueeze(0)) ** 2)
-    #             losses_scale.append(l_s)
-    #
-    #     l_scale = torch.mean(torch.stack(losses_scale)) if losses_scale else torch.tensor(0.0, device=centers.device)
-    #
-    #     return l_div, l_scale
+    def compute_gbc_losses(self, loss_intermediates: dict, net_module: nn.Module) -> Tuple[torch.Tensor, torch.Tensor]:
+        model_gbc = net_module.gbc
+        centers = model_gbc.centers  # (K, d)
+        K = centers.shape[0]
+
+        # 1. Wasserstein-based Diversity Loss (prevent center collapse)
+        if K > 1:
+            dist_matrix = torch.cdist(centers, centers, p=2)  # (K, K)
+            mask = ~torch.eye(K, dtype=torch.bool, device=centers.device)
+            l_div = torch.exp(-dist_matrix)[mask].mean()
+        else:
+            l_div = torch.tensor(0.0, device=centers.device)
+
+        # 2. Scale / Radius-Dispersion Consistency Loss
+        if hasattr(model_gbc, 'log_sigma') and model_gbc.log_sigma is not None:
+            sigma = torch.functional.F.softplus(model_gbc.log_sigma) + 1e-6  # (K, d)
+        else:
+            sigma = torch.functional.F.softplus(model_gbc.log_radius) + 1e-6  # (K, 1)
+        sigma_sq = sigma ** 2
+
+        losses_scale = []
+        for suffix in ["_1", "_2"]:
+            att_key = f"att{suffix}"
+            dif_key = f"dif{suffix}"
+            if att_key in loss_intermediates and dif_key in loss_intermediates:
+                att = loss_intermediates[att_key]  # (B, N, K)
+                dif = loss_intermediates[dif_key]  # (B, N, K, d)
+
+                # Weighted dispersion: sum_i (att_i * (x_i - c)^2) / sum_i att_i
+                dif_sq = dif ** 2  # (B, N, K, d)
+                num = (att.unsqueeze(-1) * dif_sq).sum(dim=1)  # (B, K, d)
+                den = att.sum(dim=1).unsqueeze(-1) + 1e-6  # (B, K, 1)
+                weighted_dispersion = num / den  # (B, K, d)
+
+                if sigma_sq.shape[-1] == 1:
+                    target_dispersion = weighted_dispersion.mean(dim=-1, keepdim=True)
+                else:
+                    target_dispersion = weighted_dispersion
+
+                # Mean squared error between dispersion and scale
+                l_s = torch.mean((target_dispersion - sigma_sq.unsqueeze(0)) ** 2)
+                losses_scale.append(l_s)
+
+        l_scale = torch.mean(torch.stack(losses_scale)) if losses_scale else torch.tensor(0.0, device=centers.device)
+
+        return l_div, l_scale
+
     def compute_rul_losses(self, output, target) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.loss(output, target)
 
@@ -130,9 +139,15 @@ class nnUNetTrainerRUL(nnUNetTrainer):
         with autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
             # Check if the network returns (output, loss_intermediates) or just output (baseline)
             net_outputs = self.network(data)
-
-            output = net_outputs
-            l = self.loss(output, target)
+            if isinstance(net_outputs, tuple):
+                output, loss_intermediates = net_outputs
+                l_seg = self.loss(output, target)
+                net_module = self._get_actual_network()
+                l_div, l_scale = self.compute_gbc_losses(loss_intermediates, net_module)
+                l = l_seg + 0.1 * l_div + 0.1 * l_scale
+            else:
+                output = net_outputs
+                l = self.loss(output, target)
 
         if self.grad_scaler is not None:
             self.grad_scaler.scale(l).backward()
@@ -327,7 +342,25 @@ class nnUNetTrainerNeXtGBC(nnUNetTrainerRUL):
         patch_size = configuration_manager.patch_size
         img_size = patch_size[0]
 
-        return UNext(
+        return NeXtGBC(
+            num_classes=num_output_channels,
+            input_channels=num_input_channels,
+            deep_supervision=False,
+            img_size=img_size
+        )
+
+
+class nnUNetTrainerNeXtGBC_S(nnUNetTrainerRUL):
+    @staticmethod
+    def build_network_architecture(plans_manager: PlansManager,
+                                   configuration_manager: ConfigurationManager,
+                                   num_input_channels: int,
+                                   num_output_channels: int,
+                                   enable_deep_supervision: bool = True) -> nn.Module:
+        patch_size = configuration_manager.patch_size
+        img_size = patch_size[0]
+
+        return NeXtGBC_S(
             num_classes=num_output_channels,
             input_channels=num_input_channels,
             deep_supervision=False,
