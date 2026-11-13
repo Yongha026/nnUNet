@@ -177,8 +177,8 @@ if __name__ == "__main__":
     device = torch.device(device_str)
 
     model_path_adgbc = args.MODEL_PATH
-    ADGBC_match = "nnUNetTrainerGBC_" in args.MODEL_PATH
-    DGBC_match = "nnUNetTrainerDGBC_" in args.MODEL_PATH
+    ADGBC_match = any(x in args.MODEL_PATH for x in ["nnUNetTrainerGBC_", "nnUNetTrainerSAM_GBC_"])
+    DGBC_match = any(x in args.MODEL_PATH for x in ["nnUNetTrainerDGBC_", "nnUNetTrainerSAM_DGBC_"])
     KMeans_match = "nnUNetTrainerKMeans_" in args.MODEL_PATH
     Next_match = any(x in args.MODEL_PATH for x in ["nnUNetTrainer_Next_", "Next", "next", "UNext", "unext"])
 
@@ -436,26 +436,7 @@ if __name__ == "__main__":
                         if len(c_feats) > 0:
                             feats_by_class[tag][c].append(c_feats)
 
-    # ── balance & merge ───────────────────────────────────────────────────
-    selected_feats, selected_labels = [], []
-
-    for c in range(NUM_CLASSES):
-        if len(feats_by_class[c]) == 0:
-            continue
-        c_all = np.vstack(feats_by_class[c])
-
-        cap = class_caps[c]
-        if len(c_all) > cap:
-            idx = np.random.choice(len(c_all), cap, replace=False)
-            c_all = c_all[idx]
-
-        selected_feats.append(c_all)
-        selected_labels.append(np.full(len(c_all), c))
-
-    X = np.vstack(selected_feats)    # [N_total, C]
-    y = np.concatenate(selected_labels)
-
-    # ── Dimensionality reduction & center projection ─────────────────────────
+    # ── GBC center setup ──────────────────────────────────────────────────
     has_gbc_centers = hasattr(model, 'gbc') and hasattr(model.gbc, 'centers')
     if (args.center or args.pca) and not has_gbc_centers:
         print(f"[WARNING] Model '{model_prefix}' does not have GBC cluster centers. Center visualization disabled.")
@@ -465,131 +446,173 @@ if __name__ == "__main__":
 
     centers = model.gbc.centers.detach().cpu().numpy() if show_centers else None
 
-    if args.pca:
-        pca = PCA(n_components=2, random_state=args.seed)
-        if show_centers:
-            all_points = np.vstack([X, centers])
-            print(f"[INFO] Running PCA on {X.shape[0]} feature elements + {gbc_num_balls} centers …")
-            emb = pca.fit_transform(all_points)
-            X_embedded = emb[:len(X)]
-            centers_embedded = emb[len(X):]
-        else:
-            print(f"[INFO] Running PCA on {X.shape[0]} feature elements …")
-            X_embedded = pca.fit_transform(X)
-            centers_embedded = None
-        method_name = "PCA"
-        marker_style = "*"
-        marker_size = 140
-        center_label = "PCA Centers (*)"
-        var_pct = pca.explained_variance_ratio_.sum() * 100
-        method_detail = f"PCA (Explained Var: {var_pct:.1f}%)"
-        reduction_tag = "pca"
-    else:
-        tsne = TSNE(
-            n_components=2,
-            perplexity=args.perplexity,
-            n_jobs=-1,
-            random_state=args.seed,
-        )
-        if show_centers:
-            all_points = np.vstack([X, centers])
-            print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
-            emb = tsne.fit_transform(all_points)
-            X_embedded = emb[:len(X)]
-            centers_embedded = emb[len(X):]
-        else:
-            print(f"[INFO] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
-            X_embedded = tsne.fit_transform(X)
-            centers_embedded = None
-        method_name = "t-SNE"
-        marker_style = "^"
-        marker_size = 80
-        center_label = "GBC Centers (^)"
-        method_detail = f"t-SNE (perplexity={args.perplexity})"
-        reduction_tag = "tsne"
-
-    # ── class label remapping & colormap ─────────────────────────────────
-    tab10_cmap = plt.cm.get_cmap("tab10")
-    if args.pupil_only:
-        y_plot = np.where(y == 3, 1, 0)
-        plot_cmap = ListedColormap(tab10_cmap.colors[:2])
-        ticks = [0, 1]
-        tick_labels = ["Else", "Pupil"]
-        suffix = "pupil_only"
-    else:
-        y_plot = y
-        plot_cmap = ListedColormap(tab10_cmap.colors[:4])
-        ticks = [0, 1, 2, 3]
-        tick_labels = ["Background", "Sclera", "Iris", "Pupil"]
-        suffix = "all_classes"
-
-    # ── plot ──────────────────────────────────────────────────────────────
-    plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(
-        X_embedded[:, 0],
-        X_embedded[:, 1],
-        c=y_plot,
-        cmap=plot_cmap,
-        alpha=0.4,
-        s=5,
-        zorder=1,
-    )
-
-    if show_centers and centers_embedded is not None:
-        ball_cmap = plt.cm.get_cmap("tab20")
-        for k in range(gbc_num_balls):
-            color_k = ball_cmap(k % 20)
-            ck = centers_embedded[k]
-            plt.scatter(
-                ck[0],
-                ck[1],
-                marker=marker_style,
-                s=marker_size,
-                c=[color_k],
-                edgecolors="black",
-                linewidths=0.8,
-                zorder=5,
-            )
-            plt.annotate(
-                str(k),
-                xy=(ck[0], ck[1]),
-                fontsize=7,
-                fontweight="bold",
-                ha="center",
-                va="bottom",
-                color="black",
-                zorder=6,
-            )
-
-    cbar = plt.colorbar(scatter, ticks=ticks)
-    cbar.ax.set_yticklabels(tick_labels)
-    cbar.set_label("Class ID")
-
-    center_title = f" with {center_label}" if show_centers else ""
-    Enc_or_Dec = "Decoder" if args.dec else "Encoder"
-    plt.title(
-        f"[{dataset_prefix}] {model_prefix} Pixel-wise {Enc_or_Dec} Feature Clustering{center_title}\n"
-        f"Processed Features • {X.shape[0]} points • {method_detail}",
-        fontsize=11,
-    )
-    plt.tight_layout()
-
-    # ── save ──────────────────────────────────────────────────────────────
     results_dir = os.path.join(exp_dir, "tsne_results")
     os.makedirs(results_dir, exist_ok=True)
 
-    center_suffix = "_centers" if show_centers else ""
-    ratio_suffix = "_actual_ratio" if args.actual_ratio else ""
-    if args.output:
-        save_path = args.output
-    else:
-        enc_or_dec = "Dec" if args.dec else "Enc"
-        balls_str = f"_{gbc_num_balls}_balls" if gbc_num_balls is not None else ""
-        save_path = os.path.join(
-            results_dir,
-            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}{balls_str}_{reduction_tag}_{suffix}{center_suffix}{ratio_suffix}.png",
+    # Reuse deterministic per-class subsample indices across stages (Before/Enc/Dec)
+    sampled_indices_by_class = {}
+
+    for title_label, tag in feature_specs:
+        # ── balance & merge ───────────────────────────────────────────────────
+        selected_feats, selected_labels = [], []
+
+        for c in range(NUM_CLASSES):
+            if len(feats_by_class[tag][c]) == 0 or class_caps[c] <= 0:
+                continue
+            c_all = np.vstack(feats_by_class[tag][c])
+
+            cap = class_caps[c]
+            if len(c_all) > cap:
+                prev_idx = sampled_indices_by_class.get(c)
+                if prev_idx is None or len(prev_idx) != cap or prev_idx.max() >= len(c_all):
+                    rng = np.random.default_rng(args.seed + c)
+                    sampled_indices_by_class[c] = rng.choice(len(c_all), cap, replace=False)
+                c_all = c_all[sampled_indices_by_class[c]]
+
+            selected_feats.append(c_all)
+            selected_labels.append(np.full(len(c_all), c))
+
+        if not selected_feats:
+            raise RuntimeError(f"No features collected for stage '{tag}'. Check image/mask alignment and class_caps.")
+
+        X = np.vstack(selected_feats)    # [N_total, C]
+        y = np.concatenate(selected_labels)
+
+        # ── Dimensionality reduction & center projection ─────────────────────────
+        stage_show_centers = show_centers
+        if stage_show_centers and centers.shape[1] != X.shape[1]:
+            print(
+                f"[WARNING] Center dim ({centers.shape[1]}) != stage '{tag}' feature dim ({X.shape[1]}). "
+                "Disabling center overlay for this stage."
+            )
+            stage_show_centers = False
+
+        if args.pca:
+            pca = PCA(n_components=2, random_state=args.seed)
+            if stage_show_centers:
+                all_points = np.vstack([X, centers])
+                print(f"[INFO] [{tag}] Running PCA on {X.shape[0]} feature elements + {gbc_num_balls} centers …")
+                emb = pca.fit_transform(all_points)
+                X_embedded = emb[:len(X)]
+                centers_embedded = emb[len(X):]
+            else:
+                print(f"[INFO] [{tag}] Running PCA on {X.shape[0]} feature elements …")
+                X_embedded = pca.fit_transform(X)
+                centers_embedded = None
+            method_name = "PCA"
+            marker_style = "*"
+            marker_size = 140
+            center_label = "PCA Centers (*)"
+            var_pct = pca.explained_variance_ratio_.sum() * 100
+            method_detail = f"PCA (Explained Var: {var_pct:.1f}%)"
+            reduction_tag = "pca"
+        else:
+            tsne = TSNE(
+                n_components=2,
+                perplexity=args.perplexity,
+                n_jobs=-1,
+                random_state=args.seed,
+            )
+            if stage_show_centers:
+                all_points = np.vstack([X, centers])
+                print(f"[INFO] [{tag}] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
+                emb = tsne.fit_transform(all_points)
+                X_embedded = emb[:len(X)]
+                centers_embedded = emb[len(X):]
+            else:
+                print(f"[INFO] [{tag}] Running t-SNE on {X.shape[0]} feature elements (perplexity={args.perplexity}) …")
+                X_embedded = tsne.fit_transform(X)
+                centers_embedded = None
+            method_name = "t-SNE"
+            marker_style = "^"
+            marker_size = 80
+            center_label = "GBC Centers (^)"
+            method_detail = f"t-SNE (perplexity={args.perplexity})"
+            reduction_tag = "tsne"
+
+        # ── class label remapping & colormap ─────────────────────────────────
+        tab10_cmap = plt.cm.get_cmap("tab10")
+        if args.pupil_only:
+            y_plot = np.where(y == 3, 1, 0)
+            plot_cmap = ListedColormap(tab10_cmap.colors[:2])
+            ticks = [0, 1]
+            tick_labels = ["Else", "Pupil"]
+            suffix = "pupil_only"
+        else:
+            y_plot = y
+            plot_cmap = ListedColormap(tab10_cmap.colors[:4])
+            ticks = [0, 1, 2, 3]
+            tick_labels = ["Background", "Sclera", "Iris", "Pupil"]
+            suffix = "all_classes"
+
+        # ── plot ──────────────────────────────────────────────────────────────
+        plt.figure(figsize=(10, 8))
+        scatter = plt.scatter(
+            X_embedded[:, 0],
+            X_embedded[:, 1],
+            c=y_plot,
+            cmap=plot_cmap,
+            alpha=0.4,
+            s=5,
+            zorder=1,
         )
 
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[INFO] Saved → {save_path}")
+        if stage_show_centers and centers_embedded is not None:
+            ball_cmap = plt.cm.get_cmap("tab20")
+            for k in range(gbc_num_balls):
+                color_k = ball_cmap(k % 20)
+                ck = centers_embedded[k]
+                plt.scatter(
+                    ck[0],
+                    ck[1],
+                    marker=marker_style,
+                    s=marker_size,
+                    c=[color_k],
+                    edgecolors="black",
+                    linewidths=0.8,
+                    zorder=5,
+                )
+                plt.annotate(
+                    str(k),
+                    xy=(ck[0], ck[1]),
+                    fontsize=7,
+                    fontweight="bold",
+                    ha="center",
+                    va="bottom",
+                    color="black",
+                    zorder=6,
+                )
+
+        cbar = plt.colorbar(scatter, ticks=ticks)
+        cbar.ax.set_yticklabels(tick_labels)
+        cbar.set_label("Class ID")
+
+        center_title = f" with {center_label}" if stage_show_centers else ""
+        plt.title(
+            f"[{dataset_prefix}] {model_prefix} Pixel-wise {title_label} Feature Clustering{center_title}\n"
+            f"Processed Features • {X.shape[0]} points • {method_detail}",
+            fontsize=11,
+        )
+        plt.tight_layout()
+
+        # ── save ──────────────────────────────────────────────────────────────
+        center_suffix = "_centers" if stage_show_centers else ""
+        ratio_suffix = "_actual_ratio" if args.actual_ratio else ""
+        if args.output:
+            if len(feature_specs) > 1:
+                root, ext = os.path.splitext(args.output)
+                save_path = f"{root}_{tag}{ext}"
+            else:
+                save_path = args.output
+            out_dir = os.path.dirname(os.path.abspath(save_path))
+            os.makedirs(out_dir, exist_ok=True)
+        else:
+            balls_str = f"_{gbc_num_balls}_balls" if gbc_num_balls is not None else ""
+            save_path = os.path.join(
+                results_dir,
+                f"{model_prefix}_{dataset_prefix}_{tag}{balls_str}_{reduction_tag}_{suffix}{center_suffix}{ratio_suffix}.png",
+            )
+
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        print(f"[INFO] Saved → {save_path}")
