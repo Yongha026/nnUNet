@@ -12,6 +12,10 @@ Options
 -------
 --datas             Number of images to sample (default: 1024)
 --samples_per_class Max points per class for t-SNE (default: 2000)
+--actual_ratio      Sample proportional to the actual per-class pixel ratio
+                    instead of the uniform samples_per_class cap
+--three_imgs        Save separate t-SNE plots for the three feature stages:
+                    Before (pre-GBC), Enc (post-GBC) and Dec (refined decoder)
 --pupil_only        Binary: Pupil vs Else (default)
 --all_classes       Full 4-class: Background / Sclera / Iris / Pupil
 --output            Output path (default: auto-generated in tsne_results/)
@@ -61,6 +65,10 @@ class ImageDataset(Dataset):
     def __len__(self):
         return len(self.image_paths)
 
+    def _load_mask(self, img_path):
+        msk_path = img_path.replace("images", "labels").replace("png", "npy")
+        return np.load(msk_path).astype(np.uint8)
+
     def __getitem__(self, idx):
         # Image
         img_path = self.image_paths[idx]
@@ -73,11 +81,7 @@ class ImageDataset(Dataset):
         pil_img = PIL.Image.fromarray(img_clahe)
 
         # Mask
-        msk_path = (
-            self.image_paths[idx].replace("images", "labels").replace("png", "npy")
-        )
-
-        msk = np.load(msk_path).astype(np.uint8)
+        msk = self._load_mask(self.image_paths[idx])
         msk_resized = cv2.resize(msk, (48, 48), interpolation=cv2.INTER_NEAREST)
         return self.transform(pil_img), msk_resized
 
@@ -97,6 +101,17 @@ if __name__ == "__main__":
         default=2000,
         type=int,
         help="Max points per class for t-SNE",
+    )
+    parser.add_argument(
+        "--actual_ratio",
+        action="store_true",
+        default=False,
+        help=(
+            "Sample points proportional to the actual per-class pixel ratio "
+            "(instead of the uniform samples_per_class cap). The total point "
+            "budget is still NUM_CLASSES * samples_per_class, distributed "
+            "according to the measured class frequencies."
+        ),
     )
     # Class toggle — default is --pupil_only
     class_group = parser.add_mutually_exclusive_group()
@@ -145,6 +160,16 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Visualize Decoder features; After Cluster refinement addition"
+    )
+    parser.add_argument(
+        "--three_imgs",
+        action="store_true",
+        default=False,
+        help=(
+            "Save separate t-SNE plots for the three feature stages: "
+            "Before (pre-GBC encoder), Enc (post-GBC encoder) and "
+            "Dec (refined decoder). Requires a GBC model (ADGBC/DGBC)."
+        ),
     )
     args = parser.parse_args()
 
@@ -210,6 +235,13 @@ if __name__ == "__main__":
     else:
         gbc_num_balls = None
         print(f"[INFO] Model architecture: UNeXt (no cluster centers)")
+
+    if args.three_imgs and not (ADGBC_match or DGBC_match):
+        parser.error(
+            "--three_imgs requires a GBC model (ADGBC/DGBC) whose forward "
+            "returns pre/post-GBC features via return_details=True."
+        )
+
     np.random.seed(args.seed)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -304,48 +336,105 @@ if __name__ == "__main__":
     NUM_CLASSES = 4
     SAMPLES_PER_CLASS = args.samples_per_class
 
-    feats_by_class = {c: [] for c in range(NUM_CLASSES)}
+    # ── feature specs ─────────────────────────────────────────────────────
+    # Each spec: (title label for the plot, filename tag)
+    if args.three_imgs:
+        feature_specs = [
+            ("Before (pre-GBC)", "Before"),
+            ("Encoder (post-GBC)", "Enc"),
+            ("Decoder (refined)", "Dec"),
+        ]
+    elif args.dec:
+        feature_specs = [("Decoder", "Dec")]
+    else:
+        feature_specs = [("Encoder", "Enc")]
+
+    # Per-stage per-class feature buffers
+    feats_by_class = {tag: {c: [] for c in range(NUM_CLASSES)} for _, tag in feature_specs}
+
+    # ── sampling caps ─────────────────────────────────────────────────────
+    # Default: uniform cap (samples_per_class) for every class.
+    # With --actual_ratio, measure the real per-class pixel frequencies first
+    # (masks only, no model forward) and distribute the total budget
+    # (NUM_CLASSES * samples_per_class) proportionally to them.
+    class_caps = {c: SAMPLES_PER_CLASS for c in range(NUM_CLASSES)}
+
+    if args.actual_ratio:
+        grid = 48  # mask grid resolution — matches __getitem__
+        class_counts = np.zeros(NUM_CLASSES, dtype=np.int64)
+        for img_path in tqdm(rand_images, desc="Counting class ratio"):
+            msk = dataset._load_mask(img_path)
+            msk_r = cv2.resize(msk, (grid, grid), interpolation=cv2.INTER_NEAREST)
+            class_counts += np.bincount(
+                msk_r.reshape(-1), minlength=NUM_CLASSES
+            )[:NUM_CLASSES]
+
+        total_pixels = int(class_counts.sum())
+        total_budget = NUM_CLASSES * SAMPLES_PER_CLASS
+        for c in range(NUM_CLASSES):
+            if total_pixels == 0 or class_counts[c] == 0:
+                class_caps[c] = 0
+            else:
+                ratio = class_counts[c] / total_pixels
+                target = int(round(total_budget * ratio))
+                # never ask for more points than actually exist for this class
+                class_caps[c] = min(int(class_counts[c]), max(0, target))
+
+        print(f"[INFO] Actual per-class pixel counts: "
+              f"{dict(zip(range(NUM_CLASSES), class_counts.tolist()))}")
+        print(f"[INFO] Actual-ratio sampling targets (total budget {total_budget}): "
+              f"{class_caps}")
 
     # ── feature extraction ────────────────────────────────────────────────
-    if not args.dec:
+    if args.three_imgs:
+        print("[INFO] Extracting three feature stages: Before / Enc / Dec …")
+    elif args.dec:
+        print("[INFO] Extracting decoder refined features …")
+    else:
         print("[INFO] Extracting encoder processed features …")
-    else:print("[INFO] Extracting decoder refined features …")
 
     with torch.no_grad():
         for batch_imgs, batch_masks in tqdm(dataloader, desc="Extracting"):
             batch_imgs = batch_imgs.to(device)
 
-            # Extract encoder processed feature (enc_feature)
-            if args.dec:
-                _, _, enc = model(batch_imgs)  # [B, 64, 48, 48]
+            # Extract feature stages
+            if args.three_imgs:
+                # return_details=True → (out, t3, t3_gbc, att_t3, dec_feature)
+                _, t3, t3_gbc, att_t3, dec_feature = model(batch_imgs, return_details=True)
+                feats_map = {"Before": t3, "Enc": t3_gbc, "Dec": dec_feature}
             else:
-                _, enc, _ = model(batch_imgs)  # [B, 64, 48, 48])
-            B, C, H, W = enc.shape
+                _, enc_feature, dec_feature = model(batch_imgs)
+                feats_map = {"Enc": enc_feature, "Dec": dec_feature}
 
-            # Flatten to [B*H*W, C]
-            enc_pixels = enc.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
+            # Per-stage accumulation
+            for title_label, tag in feature_specs:
+                feat = feats_map[tag]
+                B, C, H, W = feat.shape
 
-            # Align mask spatial dimensions with feature map (e.g. UNeXt 12x12 or 6x6 vs 48x48)
-            if batch_masks.shape[1] != H or batch_masks.shape[2] != W:
-                masks_t = batch_masks.unsqueeze(1).float()
-                masks_resized = (
-                    torch.nn.functional.interpolate(masks_t, size=(H, W), mode="nearest")
-                    .squeeze(1)
-                    .byte()
-                    .numpy()
-                )
-            else:
-                masks_resized = batch_masks.numpy()
-            labels_pixels = masks_resized.reshape(-1)
+                # Flatten to [B*H*W, C]
+                feat_pixels = feat.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy()
 
-            # Per-class accumulation with cap
-            for c in range(NUM_CLASSES):
-                current_len = sum(len(x) for x in feats_by_class[c])
-                if current_len < SAMPLES_PER_CLASS:
-                    c_mask = labels_pixels == c
-                    c_feats = enc_pixels[c_mask]
-                    if len(c_feats) > 0:
-                        feats_by_class[c].append(c_feats)
+                # Align mask spatial dimensions with feature map (e.g. UNeXt 12x12 or 6x6 vs 48x48)
+                if batch_masks.shape[1] != H or batch_masks.shape[2] != W:
+                    masks_t = batch_masks.unsqueeze(1).float()
+                    masks_resized = (
+                        torch.nn.functional.interpolate(masks_t, size=(H, W), mode="nearest")
+                        .squeeze(1)
+                        .byte()
+                        .numpy()
+                    )
+                else:
+                    masks_resized = batch_masks.numpy()
+                labels_pixels = masks_resized.reshape(-1)
+
+                # Per-class accumulation with cap
+                for c in range(NUM_CLASSES):
+                    current_len = sum(len(x) for x in feats_by_class[tag][c])
+                    if current_len < class_caps[c]:
+                        c_mask = labels_pixels == c
+                        c_feats = feat_pixels[c_mask]
+                        if len(c_feats) > 0:
+                            feats_by_class[tag][c].append(c_feats)
 
     # ── balance & merge ───────────────────────────────────────────────────
     selected_feats, selected_labels = [], []
@@ -355,8 +444,9 @@ if __name__ == "__main__":
             continue
         c_all = np.vstack(feats_by_class[c])
 
-        if len(c_all) > SAMPLES_PER_CLASS:
-            idx = np.random.choice(len(c_all), SAMPLES_PER_CLASS, replace=False)
+        cap = class_caps[c]
+        if len(c_all) > cap:
+            idx = np.random.choice(len(c_all), cap, replace=False)
             c_all = c_all[idx]
 
         selected_feats.append(c_all)
@@ -489,6 +579,7 @@ if __name__ == "__main__":
     os.makedirs(results_dir, exist_ok=True)
 
     center_suffix = "_centers" if show_centers else ""
+    ratio_suffix = "_actual_ratio" if args.actual_ratio else ""
     if args.output:
         save_path = args.output
     else:
@@ -496,7 +587,7 @@ if __name__ == "__main__":
         balls_str = f"_{gbc_num_balls}_balls" if gbc_num_balls is not None else ""
         save_path = os.path.join(
             results_dir,
-            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}{balls_str}_{reduction_tag}_{suffix}{center_suffix}.png",
+            f"{model_prefix}_{dataset_prefix}_{enc_or_dec}{balls_str}_{reduction_tag}_{suffix}{center_suffix}{ratio_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")

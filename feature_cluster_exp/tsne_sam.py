@@ -13,6 +13,8 @@ Options
 -------
 --datas             Number of images to sample (default: 1024)
 --samples_per_class Max points per class for t-SNE (default: 2000)
+--actual_ratio      Sample proportional to the actual per-class pixel ratio
+                    instead of the uniform samples_per_class cap
 --batch_size        Mini-batch size for SAM forward pass (default: 4 to prevent CUDA OOM)
 --pupil_only        Binary: Pupil vs Else (default)
 --all_classes       Full 4-class: Background / Sclera / Iris / Pupil
@@ -155,6 +157,17 @@ if __name__ == "__main__":
         type=int,
         help="Mini-batch size for SAM forward pass (default: 4)",
     )
+    parser.add_argument(
+        "--actual_ratio",
+        action="store_true",
+        default=False,
+        help=(
+            "Sample points proportional to the actual per-class pixel ratio "
+            "(instead of the uniform samples_per_class cap). The total point "
+            "budget is still NUM_CLASSES * samples_per_class, distributed "
+            "according to the measured class frequencies."
+        ),
+    )
 
     class_group = parser.add_mutually_exclusive_group()
     class_group.add_argument(
@@ -278,6 +291,37 @@ if __name__ == "__main__":
     SAMPLES_PER_CLASS = args.samples_per_class
     feats_by_class = {c: [] for c in range(NUM_CLASSES)}
 
+    # ── Sampling caps ────────────────────────────────────────────────────────
+    # Default: uniform cap (samples_per_class) for every class.
+    # With --actual_ratio, measure the real per-class pixel frequencies first
+    # (masks only, no model forward) and distribute the total budget
+    # (NUM_CLASSES * samples_per_class) proportionally to them.
+    class_caps = {c: SAMPLES_PER_CLASS for c in range(NUM_CLASSES)}
+
+    if args.actual_ratio:
+        grid = dataset.grid_size  # scalar (48 or 64) — matches __getitem__ mask resize
+        class_counts = np.zeros(NUM_CLASSES, dtype=np.int64)
+        for img_path in tqdm(rand_images, desc="Counting class ratio"):
+            msk = dataset._load_mask(img_path)
+            msk_r = cv2.resize(msk, (grid, grid), interpolation=cv2.INTER_NEAREST)
+            class_counts += np.bincount(msk_r.reshape(-1), minlength=NUM_CLASSES)[:NUM_CLASSES]
+
+        total_pixels = int(class_counts.sum())
+        total_budget = NUM_CLASSES * SAMPLES_PER_CLASS
+        for c in range(NUM_CLASSES):
+            if total_pixels == 0 or class_counts[c] == 0:
+                class_caps[c] = 0
+            else:
+                ratio = class_counts[c] / total_pixels
+                target = int(round(total_budget * ratio))
+                # never ask for more points than actually exist for this class
+                class_caps[c] = min(int(class_counts[c]), max(0, target))
+
+        print(f"[INFO] Actual per-class pixel counts: "
+              f"{dict(zip(range(NUM_CLASSES), class_counts.tolist()))}")
+        print(f"[INFO] Actual-ratio sampling targets (total budget {total_budget}): "
+              f"{class_caps}")
+
     # ── Feature extraction ───────────────────────────────────────────────────
     print(f"[INFO] Extracting SAM features with {args.model_name} ...")
     pca_gbc = None
@@ -318,7 +362,7 @@ if __name__ == "__main__":
             # Class-conditional feature accumulation
             for c in range(NUM_CLASSES):
                 current_len = sum(len(x) for x in feats_by_class[c])
-                if current_len < SAMPLES_PER_CLASS:
+                if current_len < class_caps[c]:
                     c_mask = labels_pixels == c
                     c_feats = patch_pixels[c_mask]
                     if len(c_feats) > 0:
@@ -336,8 +380,9 @@ if __name__ == "__main__":
             continue
         c_all = np.vstack(feats_by_class[c])
 
-        if len(c_all) > SAMPLES_PER_CLASS:
-            idx = np.random.choice(len(c_all), SAMPLES_PER_CLASS, replace=False)
+        cap = class_caps[c]
+        if len(c_all) > cap:
+            idx = np.random.choice(len(c_all), cap, replace=False)
             c_all = c_all[idx]
 
         selected_feats.append(c_all)
@@ -469,12 +514,13 @@ if __name__ == "__main__":
     results_dir = os.path.join(script_dir, "tsne_results")
     os.makedirs(results_dir, exist_ok=True)
 
+    ratio_suffix = "_actual_ratio" if args.actual_ratio else ""
     if args.output:
         save_path = args.output
     else:
         save_path = os.path.join(
             results_dir,
-            f"{model_prefix}_{dataset_prefix}_{reduction_tag}_{suffix}.png",
+            f"{model_prefix}_{dataset_prefix}_{reduction_tag}_{suffix}{ratio_suffix}.png",
         )
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")

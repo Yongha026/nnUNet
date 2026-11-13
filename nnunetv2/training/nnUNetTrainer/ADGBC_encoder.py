@@ -385,7 +385,8 @@ class GBC_S_EncDec(nn.Module):
         out = self.pool2(out)
         out = self.conv3(out)
         t3 = out
-        # enc_feature= t3
+        before_feature = out
+
         t3_gbc, att_t3, _, dif_t3 = self.gbc(t3)
         out = self.pool3(t3_gbc)
         enc_feature = t3_gbc # GBC feature add 후의 encoder feature
