@@ -586,7 +586,7 @@ class Kmeans_encoder(nn.Module):
         )
         self.gbc = self.kmeans_block  # Backward-compatible alias for trainer inspection
 
-    def forward(self, x):
+    def forward(self, x, return_details=False):
         B = x.shape[0]
 
         ### Conv Stage
@@ -653,4 +653,7 @@ class Kmeans_encoder(nn.Module):
             }
             return out, loss_intermediates
         else:
+            if return_details:
+                # Pre-cluster (t3) and post-cluster (t3_km) encoder features
+                return out, t3, t3_km, att_t3, dec_feature
             return out, enc_feature, dec_feature

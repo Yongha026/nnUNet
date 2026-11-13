@@ -15,7 +15,8 @@ Options
 --actual_ratio      Sample proportional to the actual per-class pixel ratio
                     instead of the uniform samples_per_class cap
 --three_imgs        Save separate t-SNE plots for the three feature stages:
-                    Before (pre-GBC), Enc (post-GBC) and Dec (refined decoder)
+                    Before (pre-cluster), Enc (post-cluster) and Dec (refined
+                    decoder). Works with ADGBC / DGBC / KMeans models
 --pupil_only        Binary: Pupil vs Else (default)
 --all_classes       Full 4-class: Background / Sclera / Iris / Pupil
 --output            Output path (default: auto-generated in tsne_results/)
@@ -141,7 +142,7 @@ if __name__ == "__main__":
         "--center",
         action="store_true",
         default=False,
-        help="Visualize GBC cluster centers on the t-SNE plot",
+        help="Visualize cluster centers (GBC / KMeans) on the t-SNE plot",
     )
     parser.add_argument(
         "--pca",
@@ -167,8 +168,9 @@ if __name__ == "__main__":
         default=False,
         help=(
             "Save separate t-SNE plots for the three feature stages: "
-            "Before (pre-GBC encoder), Enc (post-GBC encoder) and "
-            "Dec (refined decoder). Requires a GBC model (ADGBC/DGBC)."
+            "Before (pre-cluster encoder), Enc (post-cluster encoder) and "
+            "Dec (refined decoder). Requires a clustering model "
+            "(ADGBC/DGBC/KMeans)."
         ),
     )
     args = parser.parse_args()
@@ -236,10 +238,10 @@ if __name__ == "__main__":
         gbc_num_balls = None
         print(f"[INFO] Model architecture: UNeXt (no cluster centers)")
 
-    if args.three_imgs and not (ADGBC_match or DGBC_match):
+    if args.three_imgs and not (ADGBC_match or DGBC_match or KMeans_match):
         parser.error(
-            "--three_imgs requires a GBC model (ADGBC/DGBC) whose forward "
-            "returns pre/post-GBC features via return_details=True."
+            "--three_imgs requires a clustering model (ADGBC/DGBC/KMeans) "
+            "whose forward returns pre/post-cluster features via return_details=True."
         )
 
     np.random.seed(args.seed)
@@ -340,8 +342,8 @@ if __name__ == "__main__":
     # Each spec: (title label for the plot, filename tag)
     if args.three_imgs:
         feature_specs = [
-            ("Before (pre-GBC)", "Before"),
-            ("Encoder (post-GBC)", "Enc"),
+            ("Before (pre-cluster)", "Before"),
+            ("Encoder (post-cluster)", "Enc"),
             ("Decoder (refined)", "Dec"),
         ]
     elif args.dec:
@@ -399,9 +401,9 @@ if __name__ == "__main__":
 
             # Extract feature stages
             if args.three_imgs:
-                # return_details=True → (out, t3, t3_gbc, att_t3, dec_feature)
-                _, t3, t3_gbc, att_t3, dec_feature = model(batch_imgs, return_details=True)
-                feats_map = {"Before": t3, "Enc": t3_gbc, "Dec": dec_feature}
+                # return_details=True → (out, t3, t3_clustered, att_t3, dec_feature)
+                _, t3, t3_clustered, att_t3, dec_feature = model(batch_imgs, return_details=True)
+                feats_map = {"Before": t3, "Enc": t3_clustered, "Dec": dec_feature}
             else:
                 _, enc_feature, dec_feature = model(batch_imgs)
                 feats_map = {"Enc": enc_feature, "Dec": dec_feature}
@@ -439,7 +441,7 @@ if __name__ == "__main__":
     # ── GBC center setup ──────────────────────────────────────────────────
     has_gbc_centers = hasattr(model, 'gbc') and hasattr(model.gbc, 'centers')
     if (args.center or args.pca) and not has_gbc_centers:
-        print(f"[WARNING] Model '{model_prefix}' does not have GBC cluster centers. Center visualization disabled.")
+        print(f"[WARNING] Model '{model_prefix}' does not have cluster centers. Center visualization disabled.")
         show_centers = False
     else:
         show_centers = (args.center or args.pca) and has_gbc_centers
@@ -502,7 +504,7 @@ if __name__ == "__main__":
             method_name = "PCA"
             marker_style = "*"
             marker_size = 140
-            center_label = "PCA Centers (*)"
+            center_label = f"PCA {'KMeans' if KMeans_match else 'GBC'} Centers (*)"
             var_pct = pca.explained_variance_ratio_.sum() * 100
             method_detail = f"PCA (Explained Var: {var_pct:.1f}%)"
             reduction_tag = "pca"
@@ -515,7 +517,7 @@ if __name__ == "__main__":
             )
             if stage_show_centers:
                 all_points = np.vstack([X, centers])
-                print(f"[INFO] [{tag}] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} GBC centers (perplexity={args.perplexity}) …")
+                print(f"[INFO] [{tag}] Running t-SNE on {X.shape[0]} feature elements + {gbc_num_balls} cluster centers (perplexity={args.perplexity}) …")
                 emb = tsne.fit_transform(all_points)
                 X_embedded = emb[:len(X)]
                 centers_embedded = emb[len(X):]
@@ -526,7 +528,7 @@ if __name__ == "__main__":
             method_name = "t-SNE"
             marker_style = "^"
             marker_size = 80
-            center_label = "GBC Centers (^)"
+            center_label = f"{'KMeans' if KMeans_match else 'GBC'} Centers (^)"
             method_detail = f"t-SNE (perplexity={args.perplexity})"
             reduction_tag = "tsne"
 
